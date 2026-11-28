@@ -3,6 +3,8 @@ import { useAtomValue } from 'jotai';
 import { allLibrariesExcludedAtom } from "../../atoms/profile";
 import RecentChats from "../RecentChats";
 import HomeLauncher from "../HomeLauncher";
+import HomeActionsTray from "../HomeActionsTray";
+import { showActionsTrayAtom } from "../../atoms/actions";
 import FeatureCreditsCard from "../featureCredits/FeatureCreditsCard";
 import FeatureCreditsTeaser from "../featureCredits/FeatureCreditsTeaser";
 import { featureCreditEntriesAtom, featureCreditsCardVisibleAtom, featureCreditsTeaserVisibleAtom } from "../../atoms/featureCredits";
@@ -43,6 +45,7 @@ const AllLibrariesExcludedMessage = () => (
 
 const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
     const allLibrariesExcluded = useAtomValue(allLibrariesExcludedAtom);
+    const showActionsTray = useAtomValue(showActionsTrayAtom);
     const featureCreditsVisible = useAtomValue(featureCreditsCardVisibleAtom);
     const featureCreditEntries = useAtomValue(featureCreditEntriesAtom);
     const activeFeatureTask = useAtomValue(activeFeatureTaskAtom);
@@ -85,15 +88,17 @@ const HomePage: React.FC<HomePageProps> = ({ isWindow = false, inputRef }) => {
                         {isCreditsFirstRun ? 'Welcome! Where should we start?' : 'How can I help you?'}
                     </div>
 
-                    {/* Input area. Feature-credit tasks sit in a tray tucked
-                        under the input their steps fill in, in place of the
-                        launcher. */}
-                    <div className="feature-credits-dock">
+                    {/* Input area, with at most one tray tucked under it.
+                        Feature-credit tasks take the launcher's place; the
+                        table notice and the feature-credit trays take
+                        precedence over the actions tray. */}
+                    <div className="home-composer-dock">
                         <DragDropWrapper>
                             <InputArea inputRef={inputRef} verticalPosition="below" hideTablePlusToolsNotice />
                         </DragDropWrapper>
                         {showTableNotice && <TablePlusToolsNotice placement="tray" />}
                         {showFeatureCredits && (showTeaser ? <FeatureCreditsTeaser /> : <FeatureCreditsCard />)}
+                        {showActionsTray && !allLibrariesExcluded && !showTableNotice && !trayOnScreen && <HomeActionsTray />}
                     </div>
 
                     {/* Action launcher — category row + expandable panels */}

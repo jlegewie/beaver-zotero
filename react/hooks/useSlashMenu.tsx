@@ -1,28 +1,16 @@
 import React, { useState, useRef, useCallback, useMemo } from 'react';
 import { useAtom, useSetAtom, useAtomValue } from 'jotai';
-import { PlusSignIcon, BookSearchIcon, LayersIcon, HighlighterIcon, ZapIcon, QuillWriteIcon } from '../components/icons/icons';
-import { CSSIcon, CSSItemTypeIcon } from '../components/icons/zotero';
+import { PlusSignIcon } from '../components/icons/icons';
+import { categoryIcon } from '../components/icons/categoryIcons';
+import GroupIcon from '../components/icons/GroupIcon';
 import { currentMessageContentAtom } from '../atoms/messageComposition';
-import { actionsAtom, actionContextAtom, resolveActionForStagingAtom } from '../atoms/actions';
-import { computeActionGroups } from '../utils/actionVisibility';
+import { actionGroupsAtom, resolveActionForStagingAtom } from '../atoms/actions';
+import type { ActionBinding } from '../utils/actionVisibility';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
-import { Action, ActionCategory, ActionTargetType, KnownActionCategory } from '@beaver/agent-core/types/actions';
+import { Action } from '@beaver/agent-core/types/actions';
 import { SlashCommandDescriptor, getActionCommand } from '@beaver/agent-ui/composer/slashCommands';
 import { matchMenuTrigger, queryForMenuTrigger, OpenTrigger } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { MenuPosition, SearchMenuItem } from '@beaver/agent-ui/primitives/SearchMenu';
-
-// Category icons match the homepage launcher and Actions preferences. Zap for missing/unknown categories.
-const CATEGORY_ICON_ENTRIES = {
-    research: BookSearchIcon,
-    write: QuillWriteIcon,
-    organize: LayersIcon,
-    annotate: HighlighterIcon,
-} satisfies Record<KnownActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>>;
-
-/** Map so Object.prototype names (`constructor`, …) don't inherit a function. */
-const CATEGORY_ICONS = new Map<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>(Object.entries(CATEGORY_ICON_ENTRIES));
-const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
-    (cat && CATEGORY_ICONS.get(cat)) || ZapIcon;
 
 export function useSlashMenu(
     inputRef: React.RefObject<HTMLElement | null>,
@@ -48,8 +36,7 @@ export function useSlashMenu(
     const setMessageContent = options?.setContent ?? setComposeMessageContent;
     const attachTargets = options?.attachTargets ?? true;
     const getCaretOffset = options?.getCaretOffset;
-    const allActions = useAtomValue(actionsAtom);
-    const ctx = useAtomValue(actionContextAtom);
+    const actionGroups = useAtomValue(actionGroupsAtom);
     const resolveActionForStaging = useSetAtom(resolveActionForStagingAtom);
 
     const [isSlashMenuOpen, setIsSlashMenuOpen] = useState(false);
@@ -67,7 +54,7 @@ export function useSlashMenu(
     // the text after the query is still what it was when the `/` was typed.
     // When the action cannot run nothing is staged, the typed text is left
     // alone, and a popup explains why.
-    const handleSlashSelect = useCallback((action: Action, groupTargetType?: ActionTargetType) => {
+    const handleSlashSelect = useCallback((action: Action, binding: ActionBinding) => {
         const queryLength = slashQueryRef.current.length;
         const keepAfter = slashTriggerRef.current?.suffix.length ?? 0;
         setIsSlashMenuOpen(false);
@@ -77,7 +64,8 @@ export function useSlashMenu(
 
         const descriptor = resolveActionForStaging({
             actionId: action.id,
-            targetType: groupTargetType,
+            targetType: binding.targetType,
+            contextOverride: binding.items ? { items: binding.items, collections: [] } : undefined,
             fallbackTitle: action.title,
             attachToComposer: attachTargets,
         });
@@ -95,7 +83,7 @@ export function useSlashMenu(
 
     const slashMenuItems = useMemo<SearchMenuItem[]>(() => {
         const query = slashSearchQuery.toLowerCase();
-        const groups = computeActionGroups(allActions, ctx);
+        const groups = actionGroups;
 
         // "Create Action" footer
         const createActionItem: SearchMenuItem = {
@@ -173,9 +161,7 @@ export function useSlashMenu(
                 headerItem.customContent = (
                     <span className="display-flex items-center gap-1 truncate">
                         <span className="scale-80 flex-shrink-0">
-                            {group.iconInfo.type === 'item-type'
-                                ? <CSSItemTypeIcon itemType={group.iconInfo.name} className="icon-16" />
-                                : <CSSIcon name={group.iconInfo.name} className="icon-16" />}
+                            <GroupIcon info={group.iconInfo} />
                         </span>
                         <span className="truncate">{group.label}</span>
                     </span>
@@ -196,7 +182,7 @@ export function useSlashMenu(
                     items.push({
                         label: action.title,
                         icon: categoryIcon(action.category),
-                        onClick: () => handleSlashSelect(action, group.targetType),
+                        onClick: () => handleSlashSelect(action, group.bind(action)),
                     });
                 }
                 if (showHeaders && group.id !== 'global' && group.label !== lastHeader) {
@@ -219,7 +205,7 @@ export function useSlashMenu(
                     items.push({
                         label: action.title,
                         icon: categoryIcon(action.category),
-                        onClick: () => handleSlashSelect(action, group.targetType),
+                        onClick: () => handleSlashSelect(action, group.bind(action)),
                     });
                 }
             }
@@ -234,7 +220,7 @@ export function useSlashMenu(
         }
 
         return items;
-    }, [allActions, ctx, slashSearchQuery, handleSlashSelect, verticalPosition]);
+    }, [actionGroups, slashSearchQuery, handleSlashSelect, verticalPosition]);
 
     /** Handle onChange for the textarea when the slash menu is open. Returns true if handled. */
     const handleSlashMenuChange = useCallback((value: string): boolean => {

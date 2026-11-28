@@ -5,7 +5,7 @@ import { KeyboardManager } from "../utils/keyboardManager";
 import { isQuickPromptShortcut } from "../utils/shortcuts";
 import { getPref } from "../utils/prefs";
 import { PreferencePageTab } from "../../react/atoms/ui";
-import { ActionCategoryFilter } from "@beaver/agent-core/types/actions";
+import type { ActionsListFilter } from "@beaver/agent-core/types/actions";
 
 import { contextMainWindow, resolveChatWindow } from "../runtime/navigation";
 import { attachViewRowDrag, detachViewRowDrag } from "../modules/viewRowDrag";
@@ -44,7 +44,7 @@ interface BeaverWindow extends Window {
         renderWindowSidebar: (container: Element) => any;
         renderTableTab?: import("./tableTabTypes").RenderTableTab;
         renderFloatingPopup: (container: Element) => any;
-        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsCategoryFilter?: ActionCategoryFilter | null) => any;
+        renderPreferencesWindow: (container: Element, initialTab?: PreferencePageTab | null, initialActionsFilter?: ActionsListFilter | null) => any;
         unmountFromElement: (container: Element) => boolean;
     };
 }
@@ -668,17 +668,17 @@ export class BeaverUIFactory {
     }
 
     /**
-     * Open Beaver preferences in a separate window. `actionsCategoryFilter` requests
-     * that the Actions tab pre-filter its list to that category (or "uncategorized").
+     * Open Beaver preferences in a separate window. `actionsFilter` requests
+     * that the Actions tab pre-filter its list by category and/or "Applies to".
      * `actionId` requests that the Actions tab reveal that action in edit mode.
      */
-    static openPreferencesWindow(tab?: PreferencePageTab, actionsCategoryFilter?: ActionCategoryFilter, actionId?: string, window?: Window): void {
+    static openPreferencesWindow(tab?: PreferencePageTab, actionsFilter?: ActionsListFilter, actionId?: string, window?: Window): void {
         const existingWindow = this.findPreferencesWindow();
         if (existingWindow) {
-            // Switch tab (and apply the category filter / action-edit request)
+            // Switch tab (and apply the list filter / action-edit request)
             // if requested via the global function
             if (tab && (Zotero as any).__beaverOpenPreferencesTab) {
-                (Zotero as any).__beaverOpenPreferencesTab(tab, actionsCategoryFilter, actionId);
+                (Zotero as any).__beaverOpenPreferencesTab(tab, actionsFilter, actionId);
             }
             existingWindow.focus();
             Zotero.debug("Beaver: Focusing existing preferences window");
@@ -695,8 +695,7 @@ export class BeaverUIFactory {
             'chrome://beaver/content/beaverPreferences.xhtml',
             BEAVER_PREFERENCES_WINDOW_NAME,
             'chrome,resizable,centerscreen,dialog=false',
-            // `??` so the uncategorized filter (`""`) is not dropped as falsy.
-            { tab: tab || null, actionsCategoryFilter: actionsCategoryFilter ?? null, actionId: actionId || null, ownerWindowRef }
+            { tab: tab || null, actionsFilter: actionsFilter ?? null, actionId: actionId || null, ownerWindowRef }
         );
         if (opened) opened.__beaverOwnerWindowRef = ownerWindowRef;
         Zotero.debug("Beaver: Opened preferences window");

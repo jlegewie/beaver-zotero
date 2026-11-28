@@ -1,7 +1,7 @@
 import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAtomValue, useSetAtom } from "jotai";
-import { Action, ActionCategory, ActionTargetType, KNOWN_ACTION_CATEGORIES, KnownActionCategory, categoryLabel, TARGET_PRESETS, targetsLabel, targetsDescription } from "@beaver/agent-core/types/actions";
+import { Action, ActionCategory, ActionTargetType, AppliesTo, KNOWN_ACTION_CATEGORIES, KnownActionCategory, appliesToFromTargets, appliesToLabel, categoryLabel, targetsFromAppliesTo } from "@beaver/agent-core/types/actions";
 import { actionsAtom } from "../../atoms/actions";
 import { getActionCommand, toSlashToken } from "@beaver/agent-ui/composer/slashCommands";
 import { hasUserInputVariables } from "../../utils/userInputVariables";
@@ -11,14 +11,10 @@ import Button from "@beaver/agent-ui/primitives/Button";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
 import Tooltip from "@beaver/agent-ui/primitives/Tooltip";
 import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
+import { categoryIcon } from "../icons/categoryIcons";
 import {
     Icon,
     ArrowDownIcon,
-    ZapIcon,
-    BookSearchIcon,
-    LayersIcon,
-    HighlighterIcon,
-    QuillWriteIcon,
     InformationCircleIcon,
     DeleteIcon,
     UndoIcon,
@@ -36,18 +32,6 @@ const MAX_PROMPT_TEXT_LENGTH = 12000;
 // Spread from KNOWN_ACTION_CATEGORIES so this picker can't drift from it.
 const CATEGORY_OPTIONS: (KnownActionCategory | undefined)[] = [undefined, ...KNOWN_ACTION_CATEGORIES];
 
-// Category icons match the homepage launcher. Zap for missing/unknown categories.
-const CATEGORY_ICON_ENTRIES = {
-    research: BookSearchIcon,
-    write: QuillWriteIcon,
-    organize: LayersIcon,
-    annotate: HighlighterIcon,
-} satisfies Record<KnownActionCategory, React.ComponentType<React.SVGProps<SVGSVGElement>>>;
-
-/** Map so Object.prototype names (`constructor`, …) don't inherit a function. */
-const CATEGORY_ICONS = new Map<string, React.ComponentType<React.SVGProps<SVGSVGElement>>>(Object.entries(CATEGORY_ICON_ENTRIES));
-const categoryIcon = (cat: ActionCategory | undefined): React.ComponentType<React.SVGProps<SVGSVGElement>> =>
-    (cat && CATEGORY_ICONS.get(cat)) || ZapIcon;
 
 /** "Required" marker shown next to mandatory field labels. Muted once the
  *  field has a value, red while it's still empty, so the user can see at a
@@ -67,6 +51,65 @@ const FieldLabel: React.FC<{ label: string; tooltip: string; className?: string 
         </Tooltip>
     </div>
 );
+
+/** The "Applies to" choices, in display order. Items covers papers and their files. */
+const APPLIES_TO_OPTIONS: { key: Exclude<keyof AppliesTo, 'needsFile'>; label: string }[] = [
+    { key: 'items', label: 'Items' },
+    { key: 'notes', label: 'Notes' },
+    { key: 'collections', label: 'Collections' },
+    { key: 'anywhere', label: 'Anywhere' },
+];
+
+/**
+ * "Applies to" editor: toggles for what the action works on, plus a "needs the
+ * file" switch for item actions that only work on an attachment. At least one
+ * choice stays on. Stored targets keep their shape until a choice changes.
+ */
+const AppliesToPicker: React.FC<{
+    targets: ActionTargetType[];
+    /** The saved targets, so an unchanged items choice keeps its stored shape. */
+    savedTargets: ActionTargetType[];
+    disabled: boolean;
+    onChange: (targets: ActionTargetType[]) => void;
+}> = ({ targets, savedTargets, disabled, onChange }) => {
+    const choice = appliesToFromTargets(targets);
+    const update = (next: AppliesTo) => {
+        if (!next.items && !next.notes && !next.collections && !next.anywhere) return;
+        onChange(targetsFromAppliesTo(next, savedTargets));
+    };
+    return (
+        <div className="display-flex flex-col gap-2 min-w-0">
+            <div className="display-flex flex-row items-center gap-2 flex-wrap" role="group" aria-label="Applies to">
+                {APPLIES_TO_OPTIONS.map(({ key, label }) => (
+                    <Button
+                        key={key}
+                        type="button"
+                        variant={choice[key] ? "surface" : "outline"}
+                        aria-pressed={choice[key]}
+                        disabled={disabled}
+                        style={{ padding: '3px 8px' }}
+                        onClick={() => update({ ...choice, [key]: !choice[key], ...(key === 'items' && choice.items ? { needsFile: false } : {}) })}
+                    >
+                        {label}
+                    </Button>
+                ))}
+            </div>
+            {choice.items && (
+                <label className="display-flex flex-row items-center gap-2 text-base font-color-secondary">
+                    <input
+                        type="checkbox"
+                        className="scale-90"
+                        style={{ minWidth: 'auto' }}
+                        checked={choice.needsFile}
+                        disabled={disabled}
+                        onChange={() => update({ ...choice, needsFile: !choice.needsFile })}
+                    />
+                    Needs the item's PDF or EPUB file
+                </label>
+            )}
+        </div>
+    );
+};
 
 interface ActionCardProps {
     action: Action;
@@ -338,20 +381,6 @@ const ActionCard: React.FC<ActionCardProps> = ({
     // Title and prompt are both required to persist an action.
     const canSave = editTitle.trim().length > 0 && editText.trim().length > 0;
 
-    // Target picker offers curated presets; the underlying model is a target
-    // set, so hand-edited custom sets round-trip untouched until the user
-    // picks a preset here.
-    const targetMenuItems: MenuItem[] = TARGET_PRESETS.map(preset => ({
-        label: preset.label,
-        onClick: () => setEditTargets(preset.targets),
-        customContent: (
-            <div className="display-flex flex-col">
-                <span className="text-sm font-color-primary">{preset.label}</span>
-                <span className="text-sm font-color-secondary">{preset.description}</span>
-            </div>
-        )
-    }));
-
     const categoryMenuItems: MenuItem[] = CATEGORY_OPTIONS.map(cat => ({
         label: categoryLabel(cat),
         onClick: () => setEditCategory(cat),
@@ -393,7 +422,7 @@ const ActionCard: React.FC<ActionCardProps> = ({
                             </Tooltip>
                         )}
                         <span className="action-target-badge" data-type={action.targets[0]}>
-                            {targetsLabel(action.targets)}
+                            {appliesToLabel(action.targets)}
                         </span>
                     </div>
                     {action.text && (
@@ -596,54 +625,44 @@ const ActionCard: React.FC<ActionCardProps> = ({
                     </div>
                 )}
 
-                {/* Applies to + Category — two halves side by side; within each half the
-                    label sits inline to the left of a compact picker. */}
-                <div className="display-flex flex-row gap-4 mt-3">
-                    <div className="display-flex flex-col flex-1 min-w-0">
-                        <div className="display-flex flex-row items-center gap-2 min-w-0">
-                            <FieldLabel
-                                label="Category"
-                                tooltip="Groups this action on the Beaver homepage launcher."
-                                className="action-field-label-inline"
-                            />
-                            <MenuButton
-                                menuItems={categoryMenuItems}
-                                variant="outline"
-                                ariaLabel="Select category"
-                                disabled={isLocked}
-                                className="action-field-select flex-1"
-                                customContent={
-                                    <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
-                                        <Icon icon={categoryIcon(editCategory)} size={14} className="font-color-secondary flex-shrink-0" />
-                                        <span className="flex-1 truncate text-base font-color-primary">{categoryLabel(editCategory)}</span>
-                                        <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
-                                    </div>
-                                }
-                            />
-                        </div>
-                    </div>
-                    <div className="display-flex flex-col flex-1 min-w-0">
-                        <div className="display-flex flex-row items-center gap-2 min-w-0">
-                            <FieldLabel
-                                label="Applies to"
-                                tooltip="Controls when this action shows up, based on your current Zotero selection."
-                                className="action-field-label-inline"
-                            />
-                            <MenuButton
-                                menuItems={targetMenuItems}
-                                variant="outline"
-                                ariaLabel="Select what this action applies to"
-                                disabled={isLocked}
-                                className="action-field-select flex-1"
-                                customContent={
-                                    <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
-                                        <span className="flex-1 truncate text-base font-color-primary">{targetsLabel(editTargets)}</span>
-                                        <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
-                                    </div>
-                                }
-                            />
-                        </div>
-                    </div>
+                {/* Applies to — decides where the action appears */}
+                <div className="display-flex flex-row items-start gap-3 mt-3 min-w-0">
+                    <FieldLabel
+                        label="Applies to"
+                        tooltip="Where this action appears: on the Beaver homepage, in the slash menu and in Zotero's right-click menu when this is selected. Anywhere: it also runs with nothing selected."
+                        className="action-field-label-inline mt-1"
+                    />
+                    <AppliesToPicker
+                        targets={editTargets}
+                        savedTargets={action.targets}
+                        disabled={isLocked}
+                        onChange={setEditTargets}
+                    />
+                </div>
+
+                {/* Category — only the icon and, for actions that work anywhere,
+                    the homepage category list */}
+                <div className="display-flex flex-row items-center gap-3 mt-3 min-w-0">
+                    <FieldLabel
+                        label="Category"
+                        tooltip="Sets the icon. Doesn't affect where the action appears. Actions that work anywhere are also listed under this category on the Beaver homepage."
+                        className="action-field-label-inline"
+                    />
+                    <MenuButton
+                        menuItems={categoryMenuItems}
+                        variant="outline"
+                        ariaLabel="Select category"
+                        disabled={isLocked}
+                        className="action-field-select"
+                        style={{ width: '200px' }}
+                        customContent={
+                            <div className="display-flex flex-row items-center gap-2 w-full min-w-0">
+                                <Icon icon={categoryIcon(editCategory)} size={14} className="font-color-secondary flex-shrink-0" />
+                                <span className="flex-1 truncate text-base font-color-primary">{categoryLabel(editCategory)}</span>
+                                <Icon icon={ArrowDownIcon} size={14} className="font-color-tertiary flex-shrink-0" />
+                            </div>
+                        }
+                    />
                 </div>
 
                 {/* Secondary actions — Delete always sits bottom-left. For a built-in,

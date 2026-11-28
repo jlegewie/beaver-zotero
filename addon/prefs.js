@@ -68,6 +68,9 @@ pref("enableResponseCompleteNotifications", true);
 pref("enableRunStatusPopup", true);
 // Separate Beaver window: whether the chat history sidebar is collapsed.
 pref("windowSidebarCollapsed", false);
+// Show the actions for the selected item, collection or open file under the
+// message box on the home page.
+pref("showActionsTray", true);
 // Whether the "Get more out of Beaver" feature-credits card on the home screen was dismissed.
 pref("featureCreditsCardDismissed", false);
 // Whether the one-line "Earn free credits" prompt that leads existing users to the

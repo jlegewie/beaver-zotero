@@ -253,7 +253,7 @@ const FeatureCreditsCard: React.FC = () => {
 
     if (showSetup && activeEntry && activeDefinition) {
         return (
-            <section className="feature-credits-card feature-credits-home" aria-label={`${activeDefinition.title}: how to start`}>
+            <section className="home-tray feature-credits-home" aria-label={`${activeDefinition.title}: how to start`}>
                 <SetupView definition={activeDefinition} credits={activeEntry.task.credits} onBack={leaveTask} />
             </section>
         );
@@ -268,7 +268,7 @@ const FeatureCreditsCard: React.FC = () => {
     const perTask = openAmounts.size === 1 ? [...openAmounts][0] : null;
 
     return (
-        <section className="feature-credits-card feature-credits-home" aria-labelledby="feature-credits-title">
+        <section className="home-tray feature-credits-home" aria-labelledby="feature-credits-title">
             <div className="feature-credits-header">
                 <h2 id="feature-credits-title" className="feature-credits-title">
                     Try Beaver and earn {totals.total - totals.earned} {totals.earned > 0 ? 'more ' : ''}free credits

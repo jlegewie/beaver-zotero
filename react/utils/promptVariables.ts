@@ -29,6 +29,7 @@ import { searchableLibraryIdsAtom } from '../atoms/profile';
 import { currentReaderAttachmentAtom } from '../atoms/messageComposition';
 import { selectedZoteroItemsAtom, currentNoteItemAtom, libraryViewAtom } from '../atoms/zoteroContext';
 import { collectionTargetSelection } from './actionVisibility';
+import { resolveItemTargets } from '../../src/services/actions/actionItemTargets';
 import { ActionTargetType } from '@beaver/agent-core/types/actions';
 import { CollectionReference } from '@beaver/agent-core/types/zotero';
 import { collectionToReference, isTargetInLibraries, viewToAttachment } from './zoteroReferences';
@@ -266,6 +267,11 @@ function selectedViewAttachments(): ViewAttachment[] {
         .filter((view): view is ViewAttachment => view !== null);
 }
 
+/** The selected items an action of this kind acts on (see `resolveItemTargets`). */
+function selectedItemTargets(kind: 'items' | 'attachment'): Zotero.Item[] {
+    return resolveItemTargets([kind], store.get(selectedZoteroItemsAtom)).items.slice(0, 10);
+}
+
 function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeContext {
     switch (targetType) {
         case 'items': {
@@ -275,10 +281,9 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
                 const parent = readerAttachment.parentItem;
                 return { items: parent ? [parent, readerAttachment] : [readerAttachment], collections: [] };
             }
-            // Library context: selected actionable regular items
-            const selected = store.get(selectedZoteroItemsAtom);
-            const regular = selected.filter((i: Zotero.Item) => i.isRegularItem() && isActionableItem(i));
-            return { items: regular.slice(0, 10), collections: [] };
+            // Library context: the selected papers, with a selected file
+            // standing in for its parent
+            return { items: selectedItemTargets('items'), collections: [] };
         }
         case 'attachment': {
             // Reader context: attachment open in reader (only if supported)
@@ -286,10 +291,9 @@ function resolveTargetTypeContext(targetType: ActionTargetType): TargetTypeConte
             if (readerAttachment && isActionableItem(readerAttachment)) {
                 return { items: [readerAttachment], collections: [] };
             }
-            // Library context: selected actionable attachments
-            const selected = store.get(selectedZoteroItemsAtom);
-            const attachments = selected.filter((i: Zotero.Item) => i.isAttachment() && isActionableItem(i));
-            return { items: attachments.slice(0, 10), collections: [] };
+            // Library context: the selected files, with a selected paper
+            // standing in for its best readable file
+            return { items: selectedItemTargets('attachment'), collections: [] };
         }
         case 'collection': {
             // Attach every selected collection, saved search and view, so an

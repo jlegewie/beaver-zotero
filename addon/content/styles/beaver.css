@@ -1501,7 +1501,7 @@
     background-color: var(--beaver-fill-bar);
     border-bottom: 1px solid var(--fill-quinary);
 }
-/* On home the notice is the tray under the input (`.feature-credits-home`). */
+/* On home the notice is a tray under the input (`.home-tray`). */
 .beaver-root .table-plus-tools-notice.is-tray {
     flex-direction: row;
     align-items: flex-start;
@@ -3501,6 +3501,142 @@
 
 [id^="beaver-pane-"] .welcome-page-button:hover {
     background-color: var(--fill-quarternary);
+}
+
+/* ── Home composer dock and trays ──
+ * At most one tray sits under the homepage input: the feature-credit card or
+ * line, the research-table notice, or the actions tray. A tray is inset from
+ * both sides and its top slides up behind the input's bottom edge, so only
+ * its sides and rounded bottom show. The inset is at least the input's corner
+ * radius, so the tray's top corners stay hidden behind the input's flat
+ * bottom. */
+.beaver-root .home-composer-dock {
+    --home-tray-inset: 10px;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Above the tray, so the input's opaque surface covers the tucked-in top. */
+.beaver-root .home-composer-dock > :first-child {
+    position: relative;
+    z-index: 1;
+}
+
+.beaver-root .home-tray {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: calc(-1 * var(--beaver-radius-card)) var(--home-tray-inset) 0;
+    padding: calc(10px + var(--beaver-radius-card)) calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
+    border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
+    background-color: var(--beaver-fill-chip);
+    font-size: 0.95rem;
+}
+
+/* A tray holding a single line. */
+.beaver-root .home-tray.is-line {
+    padding-top: calc(6px + var(--beaver-radius-card));
+    padding-bottom: 6px;
+}
+
+/* ── Slide presence ──
+ * Content that slides out from behind what sits above it (`useSlidePresence`).
+ * The slot's one grid row grows from nothing to the content's height. The
+ * content keeps its full height and sits at the bottom of the clip, so it
+ * appears to slide out rather than unroll; the clip hides the part still above
+ * the slot's top edge. */
+.beaver-root .slide-presence {
+    display: grid;
+    grid-template-rows: 0fr;
+    transition: grid-template-rows 0.2s ease-out;
+}
+
+.beaver-root .slide-presence[data-open="true"] {
+    grid-template-rows: 1fr;
+}
+
+.beaver-root .slide-presence-clip {
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-end;
+    min-height: 0;
+    overflow: hidden;
+}
+
+.beaver-root .slide-presence-clip > * {
+    flex-shrink: 0;
+}
+
+/* Still ends with a transition, so the content unmounts once closed. */
+@media (prefers-reduced-motion: reduce) {
+    .beaver-root .slide-presence {
+        transition-duration: 1ms;
+    }
+}
+
+/* ── Home actions tray ──
+ * Right-aligned, so the start of the line stays free for other content, and
+ * capped so a long title doesn't run across a wide window. */
+.beaver-root .home-actions-tray {
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-end;
+}
+
+/* The button's tooltip wraps it in its own element (the menu and tooltip
+ * render after it); both must be allowed to shrink for a long label to
+ * truncate. The wrapper's negative margin keeps the caret where it would sit
+ * without the button's hover padding. */
+.beaver-root .home-actions-tray > :first-child {
+    min-width: 0;
+    max-width: min(calc(100% + 6px), 18rem);
+    margin: -3px -6px -3px 0;
+}
+
+.beaver-root .home-actions-tray button.home-actions-tray-button {
+    min-width: 0;
+    max-width: 100%;
+}
+
+/* A quiet line like the feature-credits line. */
+.beaver-root button.home-actions-tray-button {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    padding: 3px 6px;
+    border-radius: 6px;
+    font-size: inherit;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .home-actions-tray-caret {
+    opacity: 0.6;
+}
+
+/* The menu's title: what the actions act on, with the object's own icon and
+ * full label (including "attached"), which the tray line leaves out. Ruled
+ * off from the actions like the menu's other divider. */
+.beaver-root .home-actions-menu-header {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    padding: 4px 8px 8px;
+    border-bottom: 1px solid var(--fill-quinary);
+    min-width: 0;
+}
+
+.beaver-root .home-actions-menu-header-lead {
+    font-size: 0.875rem;
+    color: var(--fill-secondary);
+}
+
+.beaver-root .home-actions-menu-header-name {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    font-weight: 500;
+    color: var(--fill-primary);
 }
 
 /* ── Home launcher: category buttons ──
@@ -6701,29 +6837,7 @@
     background-color: var(--beaver-fill-subtle);
     font-size: 0.95rem;
 }
-/* On home the card is a tray tucked under the chat input its steps fill in.
-   The input keeps its own shape; the tray is inset from both sides and its
-   top slides up behind the input's bottom edge, so only its sides and
-   rounded bottom show. The inset is at least the input's corner radius, so
-   the tray's top corners stay hidden behind the input's flat bottom. */
-.beaver-root .feature-credits-dock {
-    --feature-credits-tray-inset: 10px;
-    display: flex;
-    flex-direction: column;
-}
-/* Above the tray, so the input's opaque surface covers the tucked-in top. */
-.beaver-root .feature-credits-dock > :first-child {
-    position: relative;
-    z-index: 1;
-}
-.beaver-root .feature-credits-home {
-    gap: 6px;
-    margin: calc(-1 * var(--beaver-radius-card)) var(--feature-credits-tray-inset) 0;
-    padding: calc(10px + var(--beaver-radius-card)) calc(var(--beaver-card-pad-x) - 4px) 10px var(--beaver-card-pad-x);
-    border: 0;
-    border-radius: 0 0 var(--beaver-radius-card) var(--beaver-radius-card);
-    background-color: var(--beaver-fill-chip);
-}
+/* On home the card is a tray under the chat input (`.home-tray`). */
 .beaver-root .feature-credits-home .feature-credits-title {
     font-size: 1rem;
 }
@@ -6832,10 +6946,6 @@
 /* The one-line prompt for existing users: a quiet button, only as wide as
    its text and arrow, lined up with the card's title. Hovering darkens the
    text and arrow instead of filling the row. */
-.beaver-root .feature-credits-teaser {
-    padding-top: calc(6px + var(--beaver-radius-card));
-    padding-bottom: 6px;
-}
 .beaver-root .feature-credits-teaser .feature-credits-row {
     flex: 0 1 auto;
     width: auto;

@@ -5,22 +5,23 @@ import { Icon, TickIcon, ArrowDownIcon, UploadCircleIcon, ImportIcon } from '../
 import PlusSignIcon from '@beaver/agent-ui/icons/PlusSignIcon';
 import Button from "@beaver/agent-ui/primitives/Button";
 import { useSetAtom } from 'jotai';
-import { Action, ActionCategory, ActionCategoryFilter, ActionTargetType, generateActionId, TARGET_TYPE_LABELS, UNCATEGORIZED_FILTER, categoryLabel } from "@beaver/agent-core/types/actions";
-import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom, reloadActionsAtom } from "../../atoms/actions";
-import { pendingActionsCategoryFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
+import { Action, ActionCategory, ActionCategoryFilter, APPLIES_TO_FILTER_LABELS, AppliesToFilter, generateActionId, matchesAppliesToFilter, targetsForAppliesToFilter, UNCATEGORIZED_FILTER, categoryLabel } from "@beaver/agent-core/types/actions";
+import { actionsAtom, saveActionsAtom, hideActionAtom, restoreActionAtom, resetActionToDefaultAtom, importActionAtom, reloadActionsAtom, showActionsTrayAtom } from "../../atoms/actions";
+import { pendingActionsFilterAtom, pendingActionEditRequestAtom } from "../../atoms/ui";
 import { importActionFromFile } from "../../utils/actionShareFile";
 import { addPopupMessageAtom } from "../../utils/popupMessageUtils";
 import { getActionCommand } from "@beaver/agent-ui/composer/slashCommands";
 import { isBuiltinAction, getActionCustomizations, getHiddenBuiltinActions, hasOldCustomPrompts } from "../../types/actionStorage";
 import ActionCard from "./ActionCard";
+import PreferenceToggle from "./PreferenceToggle";
 import MenuButton from "@beaver/agent-ui/primitives/MenuButton";
 import { MenuItem } from "@beaver/agent-ui/primitives/ContextMenu";
 import {DocLink, PageHeader} from "./components/SettingsElements";
 
-// Filter dimensions. `targets` is what an action binds to (the filter matches
-// any action accepting the kind); `category` is the kind of work it is (both
-// are shown on each action card).
-const TARGET_FILTER_OPTIONS: ActionTargetType[] = ["items", "attachment", "note", "collection", "global"];
+// Filter dimensions. "Applies to" decides where an action appears (Items
+// covers both papers and their files); `category` only sets its icon. Both are
+// shown on each action card.
+const APPLIES_TO_FILTER_OPTIONS: AppliesToFilter[] = ["items", "note", "collection", "global"];
 const CATEGORY_FILTER_OPTIONS: ActionCategory[] = ["research", "write", "organize", "annotate"];
 
 /** A radio-style filter menu row with a leading check column for the active option. */
@@ -50,10 +51,11 @@ const ActionsPreferenceSection: React.FC = () => {
     const resetActionToDefault = useSetAtom(resetActionToDefaultAtom);
     const importAction = useSetAtom(importActionAtom);
     const reloadActions = useSetAtom(reloadActionsAtom);
+    const [showActionsTray, setShowActionsTray] = useAtom(showActionsTrayAtom);
     const addPopupMessage = useSetAtom(addPopupMessageAtom);
 
     // --- Filter state (null = show all for that dimension) ---
-    const [targetFilter, setTargetFilter] = useState<ActionTargetType | null>(null);
+    const [targetFilter, setTargetFilter] = useState<AppliesToFilter | null>(null);
     const [categoryFilter, setCategoryFilter] = useState<ActionCategoryFilter | null>(null);
     const isFiltering = targetFilter !== null || categoryFilter !== null;
 
@@ -62,15 +64,16 @@ const ActionsPreferenceSection: React.FC = () => {
         setCategoryFilter(null);
     }, []);
 
-    // --- Incoming category-filter request (e.g. from the homepage "Edit Actions"
-    // button) — apply it once, then clear it so it doesn't reapply on remount ---
-    const [pendingCategoryFilter, setPendingCategoryFilter] = useAtom(pendingActionsCategoryFilterAtom);
+    // --- Incoming filter request (e.g. "Add Custom Action" on the homepage or
+    // in a right-click menu) — apply it once, then clear it so it doesn't
+    // reapply on remount ---
+    const [pendingFilter, setPendingFilter] = useAtom(pendingActionsFilterAtom);
     useEffect(() => {
-        if (!pendingCategoryFilter) return;
-        setTargetFilter(null);
-        setCategoryFilter(pendingCategoryFilter.filter);
-        setPendingCategoryFilter(null);
-    }, [pendingCategoryFilter, setPendingCategoryFilter]);
+        if (!pendingFilter) return;
+        setTargetFilter(pendingFilter.filter?.appliesTo ?? null);
+        setCategoryFilter(pendingFilter.filter?.category ?? null);
+        setPendingFilter(null);
+    }, [pendingFilter, setPendingFilter]);
 
     // --- Incoming action-edit request (e.g. clicking an action pill in the
     // chat input). This effect only clears the filters so the target card is
@@ -101,12 +104,12 @@ const ActionsPreferenceSection: React.FC = () => {
     }, [actions, saveActions]);
 
     // --- Add Action Handler ---
-    // New action inherits the currently active target/category filters (falling back to
-    // global target / no category when a dimension is unfiltered). Since it always matches
+    // New action inherits the currently active "Applies to"/category filters (falling
+    // back to anywhere / no category when a dimension is unfiltered). Since it always matches
     // the active filter by construction, filters are left as-is and the new card appears
     // right in the filtered list.
     const handleAddAction = useCallback(() => {
-        const targets: ActionTargetType[] = [targetFilter ?? 'global'];
+        const targets = targetsForAppliesToFilter(targetFilter ?? 'global');
         const category = categoryFilter && categoryFilter !== UNCATEGORIZED_FILTER ? categoryFilter : undefined;
         const newAction: Action = {
             id: generateActionId(),
@@ -166,17 +169,17 @@ const ActionsPreferenceSection: React.FC = () => {
 
     // --- Filtered actions (AND across the two dimensions) ---
     const filteredActions = useMemo(() => actions.filter(a =>
-        (targetFilter === null || a.targets.includes(targetFilter)) &&
+        (targetFilter === null || matchesAppliesToFilter(a.targets, targetFilter)) &&
         (categoryFilter === null
             || (categoryFilter === UNCATEGORIZED_FILTER ? !a.category : a.category === categoryFilter))
     ), [actions, targetFilter, categoryFilter]);
 
     // --- Filter menu items ---
     const targetFilterItems: MenuItem[] = useMemo(() => [
-        filterMenuItem('All targets', targetFilter === null, () => setTargetFilter(null)),
+        filterMenuItem('Applies to anything', targetFilter === null, () => setTargetFilter(null)),
         { label: '', isDivider: true, onClick: () => {} },
-        ...TARGET_FILTER_OPTIONS.map(tt =>
-            filterMenuItem(TARGET_TYPE_LABELS[tt], targetFilter === tt, () => setTargetFilter(tt))
+        ...APPLIES_TO_FILTER_OPTIONS.map(option =>
+            filterMenuItem(APPLIES_TO_FILTER_LABELS[option], targetFilter === option, () => setTargetFilter(option))
         ),
     ], [targetFilter]);
 
@@ -189,7 +192,7 @@ const ActionsPreferenceSection: React.FC = () => {
         filterMenuItem('Uncategorized', categoryFilter === UNCATEGORIZED_FILTER, () => setCategoryFilter(UNCATEGORIZED_FILTER)),
     ], [categoryFilter]);
 
-    const targetButtonLabel = targetFilter ? TARGET_TYPE_LABELS[targetFilter] : 'All targets';
+    const targetButtonLabel = targetFilter ? `Applies to: ${APPLIES_TO_FILTER_LABELS[targetFilter]}` : 'Applies to anything';
     const categoryButtonLabel = categoryFilter === null
         ? 'All categories'
         : categoryFilter === UNCATEGORIZED_FILTER
@@ -245,10 +248,19 @@ const ActionsPreferenceSection: React.FC = () => {
                 }
             >
                 Actions are reusable prompts for common research tasks.
-                They appear based on what you're doing in Zotero: on the Beaver homepage, in the slash menu, and Zotero's right-click menu.
-                Each action targets items, collections, or your whole library, and Beaver shows the relevant ones automatically.
+                What an action applies to decides where it appears: with items, notes or collections selected, it shows up under the message box on the Beaver homepage, in the slash menu and in Zotero's right-click menu.
+                Actions that work anywhere are also listed under the homepage category buttons.
                 {' '}<DocLink path="actions">Learn more</DocLink>.
             </PageHeader>
+
+            <div className="mt-4">
+                <PreferenceToggle
+                    checked={showActionsTray}
+                    onChange={setShowActionsTray}
+                    title="Suggest actions for your selection"
+                    description="Show the actions for the selected item, collection or open file under the message box on the home page."
+                />
+            </div>
 
             {/* Filter toolbar — narrow the list by target and/or category */}
             <div className="display-flex flex-row flex-1 items-center gap-3 flex-wrap mb-15 mt-4" style={{ paddingLeft: '2px' }}>
@@ -261,7 +273,7 @@ const ActionsPreferenceSection: React.FC = () => {
                     buttonLabel={targetButtonLabel}
                     variant={targetButtonVariant}
                     rightIcon={ArrowDownIcon}
-                    ariaLabel="Filter by target"
+                    ariaLabel="Filter by what actions apply to"
                     className="text-sm"
                     style={{ padding: '3px 8px' }}
                     maxWidth="200px"

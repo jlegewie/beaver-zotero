@@ -16,7 +16,9 @@ import {
     isLockedBuiltinAction,
 } from '../types/actionStorage';
 import { zoteroContextAtom } from './zoteroContext';
-import { isActionVisible, ActionContext } from '../utils/actionVisibility';
+import { preferencesRevisionAtom } from './preferences';
+import { getPref, setPref } from '../../src/utils/prefs';
+import { computeActionGroups, ActionContext, ActionGroup } from '../utils/actionVisibility';
 import {
     resolvePromptVariables,
     resolveTargetContext,
@@ -333,14 +335,23 @@ export const actionContextAtom = atom<ActionContext>((get) => {
 });
 
 // ---------------------------------------------------------------------------
-// Derived: context-filtered actions
+// Derived: the actions that apply right now, grouped by what they act on
 // ---------------------------------------------------------------------------
 
-export const actionsForContextAtom = atom<Action[]>((get) => {
-    const actions = get(actionsAtom);
-    const ctx = get(actionContextAtom);
-    return actions.filter(a => isActionVisible(a, ctx));
-});
+export const actionGroupsAtom = atom<ActionGroup[]>((get) =>
+    computeActionGroups(get(actionsAtom), get(actionContextAtom)));
+
+/** Whether the homepage shows the actions for the current selection under the
+ *  message box. On unless turned off in Preferences › Actions. */
+export const showActionsTrayAtom = atom(
+    (get) => {
+        get(preferencesRevisionAtom);
+        return getPref('showActionsTray') !== false;
+    },
+    (_get, _set, show: boolean) => {
+        setPref('showActionsTray', show);
+    },
+);
 
 // ---------------------------------------------------------------------------
 // Bind an action to its targets the moment the user picks it.

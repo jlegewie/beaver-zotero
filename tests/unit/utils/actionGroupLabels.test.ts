@@ -9,7 +9,7 @@ vi.mock('../../../src/utils/agentItemSupport', () => ({
 vi.mock('../../../src/utils/zoteroUtils', () => ({ safeIsInTrash: () => false }));
 vi.mock('../../../react/utils/sourceUtils', () => ({ getDisplayNameFromItem: () => 'Mock Item' }));
 
-import { computeActionGroups, getActiveTarget, type ActionContext } from '../../../react/utils/actionVisibility';
+import { computeActionGroups, primaryActionGroup, type ActionContext } from '../../../react/utils/actionVisibility';
 
 function unloadedDataError(): Error {
     const error = new Error("Item data not loaded and field 'title' not set for item 3/46GA3WJK");
@@ -57,7 +57,23 @@ describe('action group labels for items whose data is not loaded', () => {
         expect(groups.find(g => g.id === 'reader')?.label).toBe('Attachment');
     });
 
-    it('gives the active target a generic label instead of throwing', () => {
-        expect(getActiveTarget(context({}, [unloadedAttachment()]))?.label).toBe('Attachment');
+    it('gives the homepage actions tray a generic label instead of throwing', () => {
+        const groups = computeActionGroups(ACTIONS, context({}, [unloadedAttachment()]));
+        expect(primaryActionGroup(groups)?.label).toBe('Attachment (attached)');
+        expect(primaryActionGroup(groups)?.shortLabel).toBe('Attachment');
+    });
+
+    it('drops the "attached" wording from the short label of several attached items', () => {
+        const group = computeActionGroups(ACTIONS, context({}, [unloadedAttachment(), unloadedAttachment()]))
+            .find(g => g.id === 'manual');
+        expect(group?.label).toBe('2 attached attachments');
+        expect(group?.shortLabel).toBe('2 attachments');
+    });
+
+    it('refers to the reader file, one item or several items by kind', () => {
+        const reader = computeActionGroups(ACTIONS, context({ type: 'reader', readerAttachment: unloadedAttachment() } as any, []));
+        expect(reader.find(g => g.id === 'reader')?.subject).toBe('this file');
+        expect(computeActionGroups(ACTIONS, context({}, [unloadedAttachment()]))[0]?.subject).toBe('this item');
+        expect(computeActionGroups(ACTIONS, context({}, [unloadedAttachment(), unloadedAttachment()]))[0]?.subject).toBe('these items');
     });
 });

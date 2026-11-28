@@ -124,6 +124,9 @@ export interface ContextMenuProps {
     onAfterClose?: () => void;
     /** Position coordinates for menu placement */
     position: MenuPosition;
+    /** Which menu edge sits at `position.x`: `start` (default) puts the menu's
+     *  left edge there, `end` its right edge, for a trigger at the end of a row. */
+    align?: 'start' | 'end';
     /** Optional CSS class name */
     className?: string;
     /** Optional class names for default menu item labels (icon + text rows) */
@@ -178,6 +181,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
     onClose, 
     onAfterClose,
     position,
+    align = 'start',
     width = undefined,
     maxWidth = undefined,
     maxHeight = undefined,
@@ -338,7 +342,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         const anchorY = position.y + (positionAdjustment.y || 0);
         
         // Calculate adjusted position to keep menu within viewport with a margin of 8px
-        let adjustedX = anchorX;
+        let adjustedX = align === 'end' ? anchorX - menuWidth : anchorX;
         let adjustedY = anchorY;
         let newPlacement: 'top' | 'bottom' | 'left' | 'right' = 'bottom';
 
@@ -393,7 +397,7 @@ const ContextMenu: React.FC<ContextMenuProps> = ({
         if (adjustedX !== adjustedPosition.x || adjustedY !== adjustedPosition.y) {
             setAdjustedPosition({ x: adjustedX, y: adjustedY });
         }
-    }, [isOpen, position, positionAdjustment, showArrow]);
+    }, [isOpen, position, align, positionAdjustment, showArrow]);
     
     // Handle outside clicks
     useEffect(() => {

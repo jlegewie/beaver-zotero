@@ -41,6 +41,7 @@ declare namespace _ZoteroTypes {
       "enableResponseCompleteNotifications": boolean;
       "enableRunStatusPopup": boolean;
       "windowSidebarCollapsed": boolean;
+      "showActionsTray": boolean;
       "featureCreditsCardDismissed": boolean;
       "featureCreditsTeaserDone": boolean;
       "sidebarWidth": number;

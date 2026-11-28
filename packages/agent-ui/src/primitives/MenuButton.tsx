@@ -27,6 +27,9 @@ interface MenuButtonProps {
     };
     /** Whether to show an arrow pointing to the button */
     showArrow?: boolean;
+    /** Align the menu's left edge (`start`, default) or right edge (`end`)
+     *  with the button's. */
+    align?: 'start' | 'end';
     /** Optional custom header content to render at the top of the menu */
     header?: ReactNode;
     /** Optional custom footer content; see `MenuFooter` for the close-aware form. */
@@ -61,6 +64,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
     positionAdjustment,
     tooltipContent,
     showArrow = false,
+    align = 'start',
     header,
     footer,
     toggleCallback,
@@ -84,7 +88,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
         if (buttonRef.current) {
             const rect = buttonRef.current.getBoundingClientRect();
             setMenuPosition({ 
-                x: rect.left,
+                x: align === 'end' ? rect.right : rect.left,
                 y: rect.bottom + 5
             });
             setIsMenuOpen(true);
@@ -154,6 +158,7 @@ const MenuButton: React.FC<MenuButtonProps> = ({
                 useFixedPosition={true}
                 positionAdjustment={positionAdjustment}
                 showArrow={showArrow}
+                align={align}
                 width={width}
                 header={header}
                 footer={footer}

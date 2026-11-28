@@ -48,19 +48,18 @@ async function onLoad() {
         }
     });
 
-    // Read the initial tab (and, for the Actions tab, an initial category filter
+    // Read the initial tab (and, for the Actions tab, an initial list filter
     // or an action to open in edit mode) from window arguments (if passed)
     var initialTab = null;
-    var initialActionsCategoryFilter = null;
+    var initialActionsFilter = null;
     var initialActionId = null;
     try {
         if (window.arguments && window.arguments[0]) {
             if (window.arguments[0].tab) {
                 initialTab = window.arguments[0].tab;
             }
-            // `!= null` so the uncategorized filter (`""`) is not dropped as falsy.
-            if (window.arguments[0].actionsCategoryFilter != null) {
-                initialActionsCategoryFilter = window.arguments[0].actionsCategoryFilter;
+            if (window.arguments[0].actionsFilter) {
+                initialActionsFilter = window.arguments[0].actionsFilter;
             }
             if (window.arguments[0].actionId) {
                 initialActionId = window.arguments[0].actionId;
@@ -84,7 +83,7 @@ async function onLoad() {
         if (typeof BeaverReact.renderPreferencesWindow === "function") {
             const container = document.getElementById("beaver-pane-preferences");
             if (container) {
-                root = BeaverReact.renderPreferencesWindow(container, initialTab, initialActionsCategoryFilter, initialActionId);
+                root = BeaverReact.renderPreferencesWindow(container, initialTab, initialActionsFilter, initialActionId);
                 Zotero.debug("Beaver: Preferences window React component mounted");
             } else {
                 Zotero.debug("Beaver Error: Container element #beaver-pane-preferences not found");

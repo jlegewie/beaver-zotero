@@ -38,7 +38,10 @@ vi.mock('../../../../react/atoms/chatAccess', async () => {
 });
 vi.mock('../../../../react/atoms/actions', async () => {
     const { atom } = await import('jotai');
-    return { actionsAtom: atom(() => [{ id: 'builtin-research-table', text: 'Create a table' }]) };
+    return {
+        actionsAtom: atom(() => [{ id: 'builtin-research-table', text: 'Create a table' }]),
+        actionGroupsAtom: atom(() => []),
+    };
 });
 vi.mock('../../../../react/atoms/featureCredits', async () => {
     const { atom } = await import('jotai');
@@ -149,7 +152,7 @@ describe('VersionUpdateMessageContent', () => {
         clickButton('Try it');
         expect(mocks.dismiss).toHaveBeenCalledOnce();
         expect(eventManager.dispatch).toHaveBeenCalledWith('toggleChat', { forceOpen: true, skipAutoPopulate: true });
-        expect(mocks.runAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'builtin-research-table' }), mocks.surfaceWindow);
+        expect(mocks.runAction).toHaveBeenCalledWith(expect.objectContaining({ id: 'builtin-research-table' }), { targetType: 'global' }, mocks.surfaceWindow);
         expect(mocks.setPref).not.toHaveBeenCalled();
     });
 

@@ -19,7 +19,6 @@ import { resolveChatWindow } from '../runtime/navigation';
 import {
     Action,
     ActionCustomizations,
-    ActionTargetType,
     isActionCustomizations,
     isStoredAction,
     normalizeStoredAction,
@@ -29,28 +28,20 @@ import { ALL_BUILTIN_ACTIONS } from '../../react/types/builtinActions';
 import { getPref } from '../utils/prefs';
 import { getSelectedCollection, getSelectedLibraryId, isCollectionTargetViewType } from '../utils/zoteroSelection';
 import { openPreferencesWindow } from '../ui/openPreferencesWindow';
-import { agentItemFilter, isAgentSupportedItem } from '../utils/agentItemSupport';
+import {
+    actsOnSelection,
+    hasItemTargets,
+    isItemTargetKind,
+    itemTargetKind,
+    resolveItemTargets,
+    summarizeItemSelection,
+    type ItemSelectionKinds,
+} from '../services/actions/actionItemTargets';
 import { exportNoteWithProgress, NOTE_EXPORT_FORMATS } from './noteExportCommand';
 import { canCreateTableIn, createAndOpenTable, newTableScope, newTableTitle } from './newTableCommand';
 import type { LibraryScope } from '@beaver/agent-core/layouts/table';
 import { detachAllTableOpenLabels } from './tableOpenMenuLabel';
 import config from '../../package.json';
-
-// ---------------------------------------------------------------------------
-// Item gating uses the React-free agentItemSupport predicates (safe to import
-// from the esbuild bundle, unlike sync.ts/zoteroUtils.ts which transitively
-// pull in react/store). Only a local trash helper remains for note checks.
-// ---------------------------------------------------------------------------
-
-function safeIsInTrash(item: any): boolean {
-    try {
-        return typeof item?.isInTrash === 'function' && item.isInTrash();
-    } catch { return false; }
-}
-
-function isActionableContextItem(item: any): boolean {
-    return agentItemFilter(item);
-}
 
 // ---------------------------------------------------------------------------
 // Zotero 10 collection-selection compat.
@@ -108,50 +99,40 @@ function readRowName(row: any): string {
 }
 
 // ---------------------------------------------------------------------------
-// Selection composition — determined per popup-show by submenu onShowing,
-// consumed by filterItemAction. Safe because submenu onShowing always fires
-// before inner menu items' onShowing (parent popup → submenu popup order).
+// Selection state — determined per popup-show by submenu onShowing, consumed
+// by filterItemAction. Safe because submenu onShowing always fires before
+// inner menu items' onShowing (parent popup → submenu popup order).
 //
-// Each action is filtered by eligibility: it shows when the selection
-// contains at least one item of a kind the action targets. On execution the
-// eligible items (across all of the action's target kinds) are attached and
-// the rest of the selection is dropped.
+// Each action follows the shared rule in `actionItemTargets`: it shows when it
+// acts on something in the selection, where a paper and its file stand in for
+// each other. On execution it attaches what it acts on and drops the rest.
 // ---------------------------------------------------------------------------
 
-interface SelectionComposition { items: number; attachment: number; note: number }
-let selectionComposition: SelectionComposition | null = null;
+interface SelectionCounts { items: number; attachment: number; note: number }
+interface ItemMenuSelection { kinds: ItemSelectionKinds; counts: SelectionCounts }
+let itemMenuSelection: ItemMenuSelection | null = null;
 
-function getSelectionComposition(items: any[]): SelectionComposition {
-    const actionable = items.filter((i: any) => isActionableContextItem(i));
-    return {
-        items: actionable.filter((i: any) => i.isRegularItem()).length,
-        attachment: actionable.filter((i: any) => i.isAttachment?.()).length,
-        note: items.filter((i: any) => i.isNote?.() && !safeIsInTrash(i)).length,
-    };
+function readItemMenuSelection(items: any[]): ItemMenuSelection {
+    const counts: SelectionCounts = { items: 0, attachment: 0, note: 0 };
+    for (const item of items) {
+        const kind = itemTargetKind(item);
+        if (kind) counts[kind]++;
+    }
+    return { kinds: summarizeItemSelection(items), counts };
 }
 
-/** Count of selected items eligible for at least one action target kind. */
-function compositionTotal(c: SelectionComposition): number {
+/** Count of selected items some action could act on. */
+function countTotal(c: SelectionCounts): number {
     return c.items + c.attachment + c.note;
 }
 
 /** Human-readable composition label (e.g. "3 items, 1 note"). */
-function compositionLabel(c: SelectionComposition): string {
+function countsLabel(c: SelectionCounts): string {
     const parts: string[] = [];
     if (c.items > 0) parts.push(`${c.items} item${c.items !== 1 ? 's' : ''}`);
     if (c.attachment > 0) parts.push(`${c.attachment} attachment${c.attachment !== 1 ? 's' : ''}`);
     if (c.note > 0) parts.push(`${c.note} note${c.note !== 1 ? 's' : ''}`);
     return parts.join(', ');
-}
-
-/** Selected-item kinds an action accepts (item context menu only). */
-const ITEM_MENU_KINDS: ActionTargetType[] = ['items', 'attachment', 'note'];
-
-/** Whether the current selection contains at least one item eligible for the action. */
-function hasEligibleItems(action: Action, c: SelectionComposition): boolean {
-    return (action.targets.includes('items') && c.items > 0) ||
-        (action.targets.includes('attachment') && c.attachment > 0) ||
-        (action.targets.includes('note') && c.note > 0);
 }
 
 const ITEM_MENU_ID = 'beaver-item-context-menu';
@@ -310,9 +291,7 @@ function registerMenus(): void {
     const actions = getMergedActions();
 
     // --- Item context menu ---
-    const itemActions = actions.filter(a =>
-        a.targets.some(t => ITEM_MENU_KINDS.includes(t))
-    );
+    const itemActions = actions.filter(a => a.targets.some(isItemTargetKind));
 
     // Always register — at minimum shows "Add custom action..."
     const itemKey = MenuManager.registerMenu({
@@ -327,7 +306,7 @@ function registerMenus(): void {
                 const { items, setVisible } = context;
 
                 // Reset module-level state
-                selectionComposition = null;
+                itemMenuSelection = null;
 
                 if (!items || items.length === 0) {
                     setVisible(false);
@@ -339,14 +318,14 @@ function registerMenus(): void {
                     return;
                 }
 
-                // Determine what eligible kinds the selection contains
-                const composition = getSelectionComposition(items);
-                if (compositionTotal(composition) === 0) {
+                // Determine what the selection offers actions
+                const selection = readItemMenuSelection(items);
+                if (!hasItemTargets(selection.kinds)) {
                     setVisible(false);
                     return;
                 }
 
-                selectionComposition = composition;
+                itemMenuSelection = selection;
                 setVisible(true);
             }),
             menus: buildItemMenuItems(itemActions),
@@ -528,8 +507,8 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
         onShowing: safeOnShowing('context-header', (_event: any, context: any) => {
             const { items, setVisible, setEnabled, setL10nArgs } = context;
             const totalSelected = items?.length ?? 0;
-            if (selectionComposition && compositionTotal(selectionComposition) < totalSelected) {
-                setL10nArgs(JSON.stringify({ context: compositionLabel(selectionComposition) }));
+            if (itemMenuSelection && countTotal(itemMenuSelection.counts) < totalSelected) {
+                setL10nArgs(JSON.stringify({ context: countsLabel(itemMenuSelection.counts) }));
                 setEnabled(false);
                 setVisible(true);
             } else {
@@ -561,7 +540,10 @@ function buildItemMenuItems(itemActions: Action[]): any[] {
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-add-action',
         onCommand: (event: any) => {
-            openPreferencesWindow('actions', undefined, undefined, event?.target?.ownerDocument?.defaultView);
+            // A new action defaults to what was right-clicked.
+            const counts = itemMenuSelection?.counts;
+            const onlyNotes = !!counts && counts.note > 0 && counts.items + counts.attachment === 0;
+            openPreferencesWindow('actions', { appliesTo: onlyNotes ? 'note' : 'items' }, undefined, event?.target?.ownerDocument?.defaultView);
         },
     });
 
@@ -589,7 +571,7 @@ function buildCollectionMenuItems(collectionActions: Action[]): any[] {
         menuType: 'menuitem' as const,
         l10nID: 'beaver-context-menu-add-action',
         onCommand: (event: any) => {
-            openPreferencesWindow('actions', undefined, undefined, event?.target?.ownerDocument?.defaultView);
+            openPreferencesWindow('actions', { appliesTo: 'collection' }, undefined, event?.target?.ownerDocument?.defaultView);
         },
     });
 
@@ -623,13 +605,13 @@ function newTableFromSelectionItem(): any {
 
 function filterItemAction(action: Action, context: any): void {
     const { items, setVisible } = context;
-    if (!items || items.length === 0 || !selectionComposition) {
+    if (!items || items.length === 0 || !itemMenuSelection) {
         setVisible(false);
         return;
     }
 
-    // Show when the selection contains at least one item the action accepts
-    setVisible(hasEligibleItems(action, selectionComposition));
+    // Show when the action acts on something in the selection
+    setVisible(actsOnSelection(action.targets, itemMenuSelection.kinds));
 }
 
 function filterCollectionAction(_action: Action, context: any): void {
@@ -651,21 +633,12 @@ async function dispatchAction(action: Action, context: any, menu: 'item' | 'coll
     const eventBus = win?.__beaverEventBus;
     if (!eventBus) return;
 
-    // Attach the union of eligible items (kinds the action targets) and drop
-    // the rest of the selection — never send mismatched items
-    const allItems: any[] = context.items ?? [];
-    const isKindEligible = (i: any): boolean => {
-        if (safeIsInTrash(i)) return false;
-        if (i.isRegularItem()) return action.targets.includes('items');
-        if (i.isAttachment?.()) return action.targets.includes('attachment') && isAgentSupportedItem(i);
-        if (i.isNote?.()) return action.targets.includes('note');
-        return false;
-    };
-    // (Collection-menu dispatches have no selected items; filtering the empty
-    // list is a no-op and the collections ride on `collections`.)
-    const filteredItems = allItems.filter(isKindEligible);
-
-    const itemIds: number[] = filteredItems.map((i: any) => i.id);
+    // Attach what the action acts on (a paper or file standing in for the
+    // other where needed) and drop the rest of the selection — never send
+    // mismatched items. Collection-menu dispatches have no selected items; the
+    // collections ride on `collections`.
+    const resolvedItems = resolveItemTargets(action.targets, context.items ?? []);
+    const itemIds: number[] = resolvedItems.items.map(i => i.id);
 
     // Carry each row's library alongside it: the receiver gates on library
     // exclusion, and both are already in hand here.
@@ -686,16 +659,12 @@ async function dispatchAction(action: Action, context: any, menu: 'item' | 'coll
 
     // Resolve the single wire target type. A collection-menu command binds to
     // the selected collections and views; an item-menu command binds to the
-    // first item-menu kind the action accepts that is actually present in
-    // what we attach. Actions such as `fix-metadata` reach both menus, so the
-    // menu, not the action's targets, decides.
+    // first accepted kind present in what we attach. Actions such as
+    // `fix-metadata` reach both menus, so the menu, not the action's targets,
+    // decides.
     const resolvedTarget = ((collections.length > 0 || views.length > 0) && action.targets.includes('collection'))
         ? 'collection'
-        : ITEM_MENU_KINDS.find(t =>
-            action.targets.includes(t) && filteredItems.some((i: any) =>
-                t === 'items' ? i.isRegularItem() : t === 'attachment' ? i.isAttachment?.() : i.isNote?.()
-            )
-        ) ?? action.targets[0];
+        : resolvedItems.targetType ?? action.targets[0];
 
     eventBus.dispatchEvent(new win.CustomEvent('contextMenuAction', {
         detail: {

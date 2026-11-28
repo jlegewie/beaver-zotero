@@ -21,7 +21,7 @@ const FeatureCreditsTeaser: React.FC = () => {
     const openCount = totals.count - totals.done;
 
     return (
-        <section className="feature-credits-card feature-credits-home feature-credits-teaser" aria-label="Free credits">
+        <section className="home-tray is-line feature-credits-teaser" aria-label="Free credits">
             <div className="feature-credits-header">
                 <button type="button" className="feature-credits-row feature-credits-row-button" onClick={() => setDone(true)}>
                     <span className="feature-credits-teaser-text">
