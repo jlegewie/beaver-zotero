@@ -219,3 +219,22 @@ export function preprocessCitationsWithRef(
     lastCitationKeyRef.value = state.lastIdentityKey;
     return result;
 }
+
+/** Private-use characters some models write around or in place of citation tags. */
+const CITATION_MARKER_CHARS = /[\uE200-\uE202]/g;
+/**
+ * The opening marker standing in for a tag's `<`: `\uE200citation id="u-KEY"/>`.
+ * Only a complete tag (an attribute and a closing `>` on the line, before any
+ * other marker) qualifies, so prose such as "citation is required" never becomes
+ * an unfinished tag.
+ */
+const MARKER_AS_TAG_OPEN = /\uE200citation(?=[ \t]+[a-z_]+[ \t]*=[^<>\n\uE200-\uE202]*>)/gi;
+
+/**
+ * Remove those characters from model text, so they never show as boxes. An
+ * opening marker that replaced a tag's `<` becomes `<citation` again, in the
+ * lowercase the citation parser requires.
+ */
+export function stripCitationMarkerChars(text: string): string {
+    return text.replace(MARKER_AS_TAG_OPEN, '<citation').replace(CITATION_MARKER_CHARS, '');
+}
