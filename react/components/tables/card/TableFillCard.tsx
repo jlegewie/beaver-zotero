@@ -2,7 +2,7 @@ import React, { useCallback, useMemo, useRef, useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
 import { tableCardDraftsAtom } from '@beaver/agent-core/run-state/pendingTableCards';
 import type { WSTableCardResponse, WSTableFillCardRequest } from '@beaver/agent-core/protocol/tableCardProtocol';
-import { refillNotice } from '@beaver/agent-core/run-state/tableFillCopy';
+import { creditsActionLabel, fillPartLabel, refillNotice, trialWithinBalance } from '@beaver/agent-core/run-state/tableFillCopy';
 import {
     FILL_TABLE_LABEL,
     fillCardTrialRows,
@@ -12,6 +12,7 @@ import {
     setInstructions,
     tableCardDecline,
     tableFillCardResponse,
+    type FillPart,
     type TableCardDraft,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { getHost } from '@beaver/agent-ui/host';
@@ -22,7 +23,15 @@ import Tooltip from '@beaver/agent-ui/primitives/Tooltip';
 import { ArrowUpRightIcon, Icon, Spinner, StopStrokeIcon, TableIcon } from '../../icons/icons';
 import AutoGrowTextarea from './AutoGrowTextarea';
 import { ColumnSummary } from './TableColumnsStep';
-import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
+import {
+    TableCardFillWarnings,
+    TableCardReceipt,
+    useAccountCreditBalance,
+    useCardBalanceShortfall,
+    useFillPricing,
+    useShortWindow,
+} from './TableCardCost';
+import { openPreferencesWindow } from '../../../ui/openPreferencesWindow';
 import { useSessionSetAtom } from '../../../hooks/useSessionSetAtom';
 
 const BLOCK_GAP = '0.85rem';
@@ -48,6 +57,11 @@ export interface TableFillCardProps {
  * it shows, and the trial its first rows: edits made meanwhile can only drop
  * work from it. A fill that reads answered papers again for a new or changed
  * question says so in a band, and the trial stands out beside it.
+ *
+ * A balance short of the fill is the red band, with a way to credits, and
+ * Fill table becomes the part it surely pays for ("Fill 8 of 23"), when the
+ * backend takes a limit. A balance short of one item replaces the trial and
+ * Fill table with the way to credits, as the table tab does.
  */
 export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit, disabled = false, heldCaption, onStop }) => {
     // Cancel view and typed instructions live in the renderer's store, keyed
@@ -74,17 +88,34 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
     const decidedRef = useRef(false);
     const locked = isDecided || disabled;
     const hasInstructions = draft.instructions.trim().length > 0;
-    const trialRows = fillCardTrialRows(request);
-    const refill = (request.rereads ?? 0) > 0 ? refillNotice(trialRows) : null;
+    // A short balance: Fill table fills the part it pays for ("Fill 8 of
+    // 23") where the backend takes a limit; none at all, and the way to
+    // credits takes Fill table's place.
+    const shortfall = useCardBalanceShortfall(request.cost, prices, !!request.accepts_limit);
+    const accountBalance = useAccountCreditBalance();
+    const blocked = !!shortfall?.blocked;
+    const part = shortfall?.part ?? null;
+    const trialRows = trialWithinBalance(fillCardTrialRows(request), shortfall);
+    // One band: the shortfall, when there is one, replaces the refill alert.
+    const refill = (request.rereads ?? 0) > 0 && !shortfall ? refillNotice(trialRows) : null;
 
     const decide = useCallback(
-        (approve: boolean, trial = false) => {
+        (approve: boolean, part: FillPart = {}) => {
             if (decidedRef.current || disabled) return;
             decidedRef.current = true;
             setIsDecided(true);
-            onSubmit(approve ? tableFillCardResponse(request, trial) : tableCardDecline(draft, request));
+            onSubmit(approve ? tableFillCardResponse(request, part) : tableCardDecline(draft, request));
         },
         [disabled, draft, onSubmit, request],
+    );
+    const warnings = (inBody: boolean) => (
+        <TableCardFillWarnings
+            cost={request.cost}
+            shortfall={shortfall}
+            refill={refill}
+            inBody={inBody}
+            creditsAction={!blocked}
+        />
     );
     const resumeReview = useCallback(() => setDraft((prev) => setCancelling(prev, false)), [setDraft]);
 
@@ -210,7 +241,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
             <span className="table-card-notice-text">{heldCaption}</span>
         </div>
     ) : shortWindow ? null : (
-        <TableCardFillWarnings cost={request.cost} prices={prices} refill={refill} />
+        warnings(false)
     );
 
     return (
@@ -242,7 +273,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                         ))}
                     </div>
                 </div>
-                {!held && shortWindow && <TableCardFillWarnings cost={request.cost} prices={prices} refill={refill} inBody />}
+                {!held && shortWindow && warnings(true)}
             </div>
 
             <div className="table-card-footer table-card-footer-stack">
@@ -251,7 +282,7 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                     card's run checkbox and receipt. */}
                 <div className={`table-card-decision ${disabled ? 'table-card-decision-held' : ''}`}>
                     <span className="table-card-decision-label">{fillScopeLine(request)}</span>
-                    <TableCardReceipt cost={request.cost} prices={prices} disabled={locked} />
+                    <TableCardReceipt cost={request.cost} prices={prices} disabled={locked} part={part} />
                 </div>
                 <div className="table-card-controls">
                     <Button
@@ -264,12 +295,22 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                     </Button>
                     <div className="flex-1" />
                     {/* While the answer is held, Stop takes the way forward's place. */}
-                    {stopButton || (
+                    {stopButton || (blocked ? (
+                        // Nothing to fill with: the way to credits replaces Fill.
+                        <Button
+                            variant="solid"
+                            onClick={() => openPreferencesWindow('billing')}
+                            className="flex-none whitespace-nowrap"
+                            style={{ padding: '3px 8px' }}
+                        >
+                            {creditsActionLabel(accountBalance)}
+                        </Button>
+                    ) : (
                         <>
                             {trialRows && (
                                 <Button
                                     variant={refill ? 'outline' : 'ghost-secondary'}
-                                    onClick={() => decide(true, true)}
+                                    onClick={() => decide(true, { trial: true })}
                                     disabled={locked}
                                     className="flex-none whitespace-nowrap"
                                     title={`Fill the first ${trialRows} rows now to check the answers`}
@@ -279,15 +320,16 @@ export const TableFillCard: React.FC<TableFillCardProps> = ({ request, onSubmit,
                             )}
                             <Button
                                 variant="solid"
-                                onClick={() => decide(true)}
+                                onClick={() => decide(true, part ? { limit: part.rows } : {})}
                                 disabled={locked}
                                 className="flex-none whitespace-nowrap"
                                 style={{ padding: '3px 8px' }}
+                                title={part ? 'Fill the items your credits cover; the rest stay pending' : undefined}
                             >
-                                {FILL_TABLE_LABEL}
+                                {part ? fillPartLabel(part) : FILL_TABLE_LABEL}
                             </Button>
                         </>
-                    )}
+                    ))}
                 </div>
             </div>
         </div>

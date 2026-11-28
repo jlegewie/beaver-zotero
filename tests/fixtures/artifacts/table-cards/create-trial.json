@@ -1,0 +1,188 @@
+{
+  "description": "A create card whose fill is large enough for a trial: the backend offers five rows and takes a limit. The user creates the table and fills only its first five rows to check the answers.",
+  "request": {
+    "event": "table_card_request",
+    "card_id": "00000000-0000-4000-8000-0000000000c8",
+    "run_id": "00000000-0000-4000-8000-0000000000a1",
+    "thread_id": "00000000-0000-4000-8000-0000000000b1",
+    "toolcall_id": "test-tool-call-id",
+    "scope": "create",
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "table": null,
+    "destination": {
+      "library_ref": "u",
+      "library_name": "My Library",
+      "collection_key": null,
+      "collection_name": null,
+      "explicit": false
+    },
+    "sources": [
+      {
+        "id": "s1",
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002",
+          "u-PAPER003",
+          "u-PAPER004",
+          "u-PAPER005",
+          "u-PAPER006",
+          "u-PAPER007",
+          "u-PAPER008",
+          "u-PAPER009",
+          "u-PAPER010",
+          "u-PAPER011",
+          "u-PAPER012",
+          "u-PAPER013",
+          "u-PAPER014",
+          "u-PAPER015",
+          "u-PAPER016",
+          "u-PAPER017",
+          "u-PAPER018",
+          "u-PAPER019",
+          "u-PAPER020",
+          "u-PAPER021",
+          "u-PAPER022",
+          "u-PAPER023",
+          "u-PAPER024"
+        ],
+        "scope": null,
+        "resolved": {
+          "count": 24,
+          "total": 24,
+          "truncated": false,
+          "without_pdf": 0,
+          "sample": [
+            {
+              "id": "u-PAPER001",
+              "title": "A study called paper001 of things"
+            },
+            {
+              "id": "u-PAPER002",
+              "title": "A study called paper002 of things"
+            }
+          ],
+          "error": null
+        }
+      }
+    ],
+    "merge": {
+      "rows": 24,
+      "duplicates": 0
+    },
+    "row_cap": 500,
+    "total": 24,
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "text",
+        "description": "How many participants took part?",
+        "options": null
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT",
+            "description": null
+          },
+          {
+            "label": "Observational",
+            "description": null
+          },
+          {
+            "label": "Other",
+            "description": null
+          }
+        ]
+      }
+    ],
+    "cost": {
+      "rows": 24,
+      "documents": 24,
+      "title_abstract": 0,
+      "no_input": 0,
+      "credits": 4.8
+    },
+    "rereads": null,
+    "trial_rows": 5,
+    "accepts_limit": true,
+    "user_instructions_prefill": "",
+    "timeout_seconds": 600.0
+  },
+  "reply": {
+    "type": "table_card_response",
+    "card_id": "00000000-0000-4000-8000-0000000000c8",
+    "approved": true,
+    "choice": "create_and_run",
+    "cost": {
+      "rows": 24,
+      "documents": 24,
+      "title_abstract": 0,
+      "no_input": 0,
+      "credits": 4.8
+    },
+    "trial": true,
+    "title": "Comparison",
+    "description": "Sample sizes across the papers.",
+    "sources": [
+      {
+        "type": "items",
+        "ids": [
+          "u-PAPER001",
+          "u-PAPER002",
+          "u-PAPER003",
+          "u-PAPER004",
+          "u-PAPER005",
+          "u-PAPER006",
+          "u-PAPER007",
+          "u-PAPER008",
+          "u-PAPER009",
+          "u-PAPER010",
+          "u-PAPER011",
+          "u-PAPER012",
+          "u-PAPER013",
+          "u-PAPER014",
+          "u-PAPER015",
+          "u-PAPER016",
+          "u-PAPER017",
+          "u-PAPER018",
+          "u-PAPER019",
+          "u-PAPER020",
+          "u-PAPER021",
+          "u-PAPER022",
+          "u-PAPER023",
+          "u-PAPER024"
+        ]
+      }
+    ],
+    "criteria": [],
+    "columns": [
+      {
+        "header": "Sample size",
+        "type": "text",
+        "description": "How many participants took part?"
+      },
+      {
+        "header": "Design",
+        "type": "select",
+        "description": "What is the study design?",
+        "options": [
+          {
+            "label": "RCT"
+          },
+          {
+            "label": "Observational"
+          },
+          {
+            "label": "Other"
+          }
+        ]
+      }
+    ]
+  }
+}

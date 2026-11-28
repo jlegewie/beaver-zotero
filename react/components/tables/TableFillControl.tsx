@@ -8,16 +8,16 @@ import {
     type TableFillScope,
 } from '@beaver/agent-core/protocol/tableFillProtocol';
 import {
-    balanceLine,
+    balanceShortfall,
     creditsActionLabel,
     FILL_BY_HAND_NOTE,
+    fillPartLabel,
     fillActionLabel,
     fillButtonLabel,
     fillButtonRows,
     creditsText,
     hasNoCredits,
     NO_CREDITS_NOTICE,
-    noCreditsText,
     pendingLines,
     planSourcesLine,
     planTitle,
@@ -28,47 +28,24 @@ import {
     runningLabel,
     shownStop,
     showsRefillNotice,
+    trialWithinBalance,
     timeLeftText,
 } from '@beaver/agent-core/run-state/tableFillCopy';
-import { ArrowDownIcon, CancelIcon, Icon, PlayIcon, Spinner, StopIcon } from '@beaver/agent-ui/icons';
+import { ArrowDownIcon, CancelIcon, Icon, InformationCircleIcon, PlayIcon, SecurityWarningIcon, Spinner, StopIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import MenuButton from '@beaver/agent-ui/primitives/MenuButton';
 import type { MenuItem } from '@beaver/agent-ui/primitives/ContextMenu';
 import type { TableRef } from '../../../src/services/artifacts/tableItemIdentity';
 import { getWindowRuntime } from '../../runtime/windowRuntime';
-import { useSurfaceWindow } from '../../runtime/SurfaceWindowContext';
 import { openPreferencesWindow } from '../../ui/openPreferencesWindow';
 import { useAtom } from 'jotai';
 import { tableNoCreditsNoticeDismissedAtom } from '../../atoms/preferences';
-import { useAccountCreditBalance, useCreditBalance } from './card/TableCardCost';
+import { useAccountCreditBalance, useCreditBalance, useRefreshBalanceOnFocus } from './card/TableCardCost';
 
 /** Opens Plan & Usage, where credits are bought. */
 function openBilling(): void {
     openPreferencesWindow('billing');
-}
-
-/** Focus events a credits prompt already answered with a refresh. */
-const refreshedOnFocus = new WeakSet<Event>();
-
-/**
- * While a way to credits is on screen, reads the balance again whenever the
- * window comes back into focus: credits bought in the browser otherwise reach
- * the profile only at its next periodic refresh. One focus refreshes once,
- * however many prompts are mounted.
- */
-function useRefreshBalanceOnFocus(active: boolean): void {
-    const win = useSurfaceWindow();
-    React.useEffect(() => {
-        if (!active) return;
-        const refresh = (event: Event) => {
-            if (refreshedOnFocus.has(event)) return;
-            refreshedOnFocus.add(event);
-            void Zotero.Beaver.account?.refresh(true);
-        };
-        win.addEventListener('focus', refresh);
-        return () => win.removeEventListener('focus', refresh);
-    }, [active, win]);
 }
 
 /**
@@ -102,8 +79,8 @@ type Popover =
           state: 'ready' | 'starting';
           plan: TableFillPlanSummary;
           error?: string;
-          /** Starting the five-row trial rather than the plan shown. */
-          trial?: boolean;
+          /** Starting only the first rows of the plan shown: the five-row trial, or the rows the balance pays for. */
+          part?: 'trial' | 'affordable';
       }
     | { scope: TableFillScope; state: 'error'; message: string };
 
@@ -140,10 +117,11 @@ const EMPTY_ROWS: string[] = [];
  * are offered in its menu but do not light it. A click plans the fill in the
  * plugin and shows the plan in a popover: how many items, the exact cost (the
  * price per item on hover), what changed, where the answers come from, and a
- * warning with a way to credits only when the balance falls short. "Fill N"
- * starts exactly that plan; "Try 5 first" plans and starts the five-row trial
- * in one step. A balance that cannot pay for one item offers "Get credits"
- * instead of Fill. While a job runs it is the Stop button.
+ * warning when the balance falls short, with "Fill first N" (the rows it pays
+ * for) and a way to credits. "Fill N" starts exactly that plan; "Try 5 first"
+ * plans and starts the five-row trial in one step. A balance that cannot pay
+ * for one item offers "Get credits" instead of Fill. While a job runs it is
+ * the Stop button.
  */
 export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFillButtonProps>(function TableFillButton(
     { tableRef, table, job, improvableRows, disabledReason, selectedRowIds = EMPTY_ROWS },
@@ -236,26 +214,27 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
     );
 
     /**
-     * Starts the plan shown, or (`trial`) the plan of its first five rows:
-     * the user has already seen the whole fill's cost, which bounds the
-     * trial's, so the trial needs no second confirmation. A refusal leaves
-     * the shown plan in place with the reason.
+     * Starts the plan shown, or the plan of its first `limit` rows (the
+     * five-row trial, or the rows the balance pays for): the user has already
+     * seen the whole fill's cost, which bounds the part's, so it needs no
+     * second confirmation. A refusal leaves the shown plan in place with the
+     * reason.
      */
     const start = React.useCallback(
-        async (trial: boolean) => {
+        async (part?: { kind: 'trial' | 'affordable'; limit: number }) => {
             if (popover?.state !== 'ready') return;
             const fills = Zotero.Beaver.tableFills;
             if (!fills) return;
             const shown = popover;
             const mine = ++request.current;
-            setPopover({ ...shown, state: 'starting', trial, error: undefined });
+            setPopover({ ...shown, state: 'starting', part: part?.kind, error: undefined });
             const fail = (message: string) => {
                 if (mine === request.current) setPopover({ ...shown, state: 'ready', error: message });
             };
             try {
                 let planId = shown.plan.plan_id;
-                if (trial) {
-                    const planned = fills.trial(planId, TRIAL_ROWS);
+                if (part) {
+                    const planned = fills.trial(planId, part.limit);
                     if (!planned.ok) return fail(planned.message);
                     planId = planned.plan.plan_id;
                 }
@@ -345,8 +324,9 @@ export const TableFillButton = React.forwardRef<TableFillButtonHandle, TableFill
                 <FillPopover
                     popover={popover}
                     answeredColumns={answeredColumns}
-                    onStart={() => void start(false)}
-                    onTrial={() => void start(true)}
+                    onStart={() => void start()}
+                    onTrial={() => void start({ kind: 'trial', limit: TRIAL_ROWS })}
+                    onFillAffordable={(rows) => void start({ kind: 'affordable', limit: rows })}
                     onCancel={close}
                 />
             ) : null}
@@ -359,12 +339,15 @@ function FillPopover({
     answeredColumns,
     onStart,
     onTrial,
+    onFillAffordable,
     onCancel,
 }: {
     popover: Popover;
     answeredColumns: ReadonlySet<string>;
     onStart: () => void;
     onTrial: () => void;
+    /** Starts only the plan's first rows, the ones the balance pays for. */
+    onFillAffordable: (rows: number) => void;
     onCancel: () => void;
 }): React.ReactElement {
     // The live balance, so credits bought while the popover is open turn
@@ -373,10 +356,21 @@ function FillPopover({
     const accountBalance = useAccountCreditBalance();
     const shownPlan = popover.state === 'ready' || popover.state === 'starting' ? popover.plan : null;
     const balance = shownPlan ? (liveBalance ?? shownPlan.balance) : null;
+    // The part the balance pays for, exactly, from the plan's own rows; a
+    // lower bound from its counts once the plugin no longer keeps the plan.
+    // Fill then starts only that part ("Fill 4 of 16").
+    const shortfall = shownPlan
+        ? balanceShortfall(shownPlan, shownPlan.prices, balance, {
+              accountBalance: accountBalance ?? balance,
+              partial: true,
+              exactPart: () => Zotero.Beaver.tableFills?.affordablePart(shownPlan.plan_id, balance) ?? null,
+          })
+        : null;
     // A balance short of one item would stop the fill before it answers
     // anything: the way to credits replaces Fill.
-    const noCredits = shownPlan ? noCreditsText(shownPlan, balance, accountBalance ?? balance) : null;
-    const reach = shownPlan && !noCredits ? balanceLine({ ...shownPlan, balance }, accountBalance ?? balance) : null;
+    const noCredits = shortfall?.blocked ? shortfall.text : null;
+    const reach = shortfall && !shortfall.blocked ? shortfall : null;
+    const part = reach?.part ?? null;
     // "Get credits" only for an account with none: credits that running fills
     // hold are still the user's.
     const creditsLabel = creditsActionLabel(accountBalance ?? balance);
@@ -402,9 +396,15 @@ function FillPopover({
         const sentences = lines.filter((line) => !line.label);
         const sources = planSourcesLine(plan);
         const starting = popover.state === 'starting';
-        // A whole pending fill can be tried on its first rows first.
-        const trialOffered = popover.scope.kind === 'pending' && !popover.scope.limit && plan.rows > TRIAL_ROWS;
-        const refill = showsRefillNotice(plan) ? refillNotice(trialOffered && !noCredits ? TRIAL_ROWS : null) : null;
+        // A whole pending fill can be tried on its first rows first, unless
+        // the balance runs out within them.
+        const trialOffered =
+            popover.scope.kind === 'pending' &&
+            !popover.scope.limit &&
+            plan.rows > TRIAL_ROWS &&
+            trialWithinBalance(TRIAL_ROWS, shortfall) != null;
+        // One callout: a short balance replaces the refill alert.
+        const refill = showsRefillNotice(plan) && !shortfall ? refillNotice(trialOffered ? TRIAL_ROWS : null) : null;
         body = (
             <>
                 <div className="bt-fill-head">
@@ -433,24 +433,27 @@ function FillPopover({
                         {sources ? <div className="bt-fill-note">{sources}</div> : null}
                     </div>
                 ) : null}
-                {refill ? (
-                    <div className="bt-fill-refill" role="note">
-                        {refill}
-                    </div>
-                ) : null}
                 {noCredits ? (
-                    <>
-                        <div className="bt-fill-reach" role="status">
-                            {noCredits}
-                        </div>
-                        <div className="bt-fill-note">{FILL_BY_HAND_NOTE}</div>
-                    </>
+                    <div className="bt-fill-callout bt-fill-callout-error" role="status">
+                        <Icon icon={SecurityWarningIcon} className="bt-fill-callout-icon" />
+                        <span>
+                            {noCredits} {FILL_BY_HAND_NOTE}
+                        </span>
+                    </div>
                 ) : reach ? (
-                    <div className="bt-fill-reach bt-fill-reach-action">
-                        <span>{reach}.</span>
-                        <button type="button" className="text-link bt-fill-reach-link" onClick={openBilling}>
-                            {creditsLabel}
-                        </button>
+                    <div className="bt-fill-callout bt-fill-callout-error" role="alert">
+                        <Icon icon={SecurityWarningIcon} className="bt-fill-callout-icon" />
+                        <span>
+                            {reach.text}{' '}
+                            <button type="button" className="text-link bt-fill-reach-link" onClick={openBilling}>
+                                {creditsLabel}
+                            </button>
+                        </span>
+                    </div>
+                ) : refill ? (
+                    <div className="bt-fill-callout bt-fill-callout-info" role="note">
+                        <Icon icon={InformationCircleIcon} className="bt-fill-callout-icon" />
+                        <span>{refill}</span>
                     </div>
                 ) : null}
                 {popover.error ? (
@@ -474,14 +477,24 @@ function FillPopover({
                         variant={refill ? 'outline' : 'ghost-secondary'}
                         onClick={onTrial}
                         disabled={starting}
-                        loading={starting && popover.trial}
+                        loading={starting && popover.part === 'trial'}
                         title={`Fill the first ${TRIAL_ROWS} rows now to check the answers`}
                     >
                         Try {TRIAL_ROWS} first
                     </Button>
                 );
-            action = (
-                <Button variant="solid" onClick={onStart} disabled={starting} loading={starting && !popover.trial}>
+            action = part ? (
+                <Button
+                    variant="solid"
+                    onClick={() => onFillAffordable(part.rows)}
+                    disabled={starting}
+                    loading={starting && popover.part === 'affordable'}
+                    title="Fill the items your credits cover; the rest stay pending"
+                >
+                    {fillPartLabel(part)}
+                </Button>
+            ) : (
+                <Button variant="solid" onClick={onStart} disabled={starting} loading={starting && !popover.part}>
                     {fillActionLabel(plan)}
                 </Button>
             );

@@ -1,10 +1,13 @@
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
-import type { Column, TableSpec } from '@beaver/agent-core/layouts/table';
+import { isFillableColumn, type Column, type TableSpec } from '@beaver/agent-core/layouts/table';
+import { rowReadByFiller } from '@beaver/agent-core/layouts/tableFill';
 import { columnProblem, type DraftColumn } from '@beaver/agent-core/run-state/tableCardDraft';
+import { columnFillCostText } from '@beaver/agent-core/run-state/tableFillCopy';
 import Button from '@beaver/agent-ui/primitives/Button';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { ColumnFields, focusAtEnd } from './ColumnEditorFields';
 import { columnAnswers, columnUpdate, dryRun, type ColumnEditorDraft } from './tableTabEdits';
+import { useFillPricing } from './card/TableCardCost';
 
 /** What the editor saves: the new draft and, when the question changed, what happens to existing answers. */
 export interface ColumnEditorSave {
@@ -21,8 +24,11 @@ function plural(count: number, noun: string): string {
  * Columns step uses (name, type, question, options), then — when the edit
  * asks a new question of a column that has answers — "Existing answers: Keep
  * them / Mark out of date", preselected by the question hash (the engine's
- * own test, run on the draft). Save hands the draft back; the caller
- * confirms what it would clear and writes it.
+ * own test, run on the draft). When the edit leaves the column to fill (a
+ * new column, a new question whose answers go out of date, a new type), it
+ * says what that fill reads and costs at most, before the fill card does.
+ * Save hands the draft back; the caller confirms what it would clear and
+ * writes it.
  */
 export function TableColumnEditor({
     spec,
@@ -69,6 +75,23 @@ export function TableColumnEditor({
     const answers = useMemo(() => (column ? columnAnswers(spec, column.id) : { model: 0, user: 0, stale: 0 }), [spec, column]);
     const askAnswers = questionChanged && answers.model + answers.user > 0;
     const keepAnswers = askAnswers ? keep === true : false;
+
+    // The rows a fill of this column would then read: every row for a new
+    // column or type, all but the user's own answers for a new question.
+    const prices = useFillPricing();
+    const typeChanged = !!column && draft.column.type !== column.type;
+    const fillRows = !column || typeChanged
+        ? spec.rows.length
+        : questionChanged && !keepAnswers
+          ? spec.rows.length - answers.user
+          : 0;
+    // "Again" once every paper was read before: a filler answer in the row,
+    // this column's own included.
+    const readBefore = useMemo(() => {
+        const fillable = spec.columns.filter(isFillableColumn);
+        return spec.rows.length > 0 && spec.rows.every((row) => rowReadByFiller(fillable, row));
+    }, [spec]);
+    const fillCost = columnFillCostText(fillRows, prices, readBefore);
 
     const problem = columnProblem(draft.column);
     const unchanged = !!column && !columnUpdate(column, draft);
@@ -139,6 +162,11 @@ export function TableColumnEditor({
                                 </span>
                             </label>
                         </fieldset>
+                    ) : null}
+                    {fillCost ? (
+                        <div className="rt-hint" role="note">
+                            {fillCost}
+                        </div>
                     ) : null}
                     {problem && (draft.column.header || draft.column.description) ? (
                         <div className="text-sm table-card-problem">{problem}</div>

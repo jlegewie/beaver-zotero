@@ -1222,6 +1222,30 @@ export class InstanceTableFills {
         return true;
     }
 
+    /**
+     * The part of a kept plan that `balance` pays for at the plan's prices:
+     * its longest run of first rows whose cost fits, as `rows` (the limit a
+     * part of the plan is planned with), the `items` among them that are
+     * read, and their `credits`. A part of that many rows does not run out
+     * of credits. Null when the plan is no longer kept or the balance is
+     * unknown.
+     */
+    affordablePart(planId: string, balance: number | null): { rows: number; items: number; credits: number } | null {
+        const plan = this.plans.get(planId);
+        if (!plan || balance == null) return null;
+        let credits = 0;
+        let rows = 0;
+        let items = 0;
+        for (const row of plan.rows) {
+            const price = rowPrice(row, plan.summary.prices);
+            if (credits + price > balance + 1e-9) break;
+            credits += price;
+            rows += 1;
+            if (row.mode === 'document' || row.mode === 'metadata') items += 1;
+        }
+        return { rows, items, credits: round(credits) };
+    }
+
     /** Credits the running jobs hold (see `FillJob.committed`); a running job holds its table's lease. */
     committedCredits(): number {
         let committed = 0;

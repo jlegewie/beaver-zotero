@@ -49,6 +49,7 @@ import {
     tableCardResponse,
     tableFillCardResponse,
     updateColumn,
+    type FillPart,
     type TableCardDraft,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { isCreateCard, isFillCard, type TableCardChoice } from '@beaver/agent-core/protocol/tableCardProtocol';
@@ -627,6 +628,14 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
     return { ok: true, approved, actedOn: [confirmationId], settle, ...currentIds() };
 }
 
+/** The part of a fill a test reply approves: `trial`, or `limit` rows. */
+function fillPart(request: any): FillPart {
+    return {
+        ...(request?.trial === true ? { trial: true } : {}),
+        ...(typeof request?.limit === 'number' ? { limit: request.limit } : {}),
+    };
+}
+
 /**
  * Answer a pending table card so a headless run can continue.
  *
@@ -635,14 +644,16 @@ export async function handleTestConfirmCreditsHttpRequest(request: any) {
  *         edits?: { title?, description?, removeItemIds?, addItemIds?,
  *                   addScopes?: TableCardLibraryScope[], removeSourceIndexes?: number[],
  *                   columns?: TableCardColumn[] },
- *         costOnly?, waitForDone?, timeoutMs? }
+ *         trial?, limit?, costOnly?, waitForDone?, timeoutMs? }
  *
  * The reply is built by the card's own draft functions, so it is the reply the
  * card would send for the same edits. A create card whose edits change its
  * sources resolves the changed sources' counts as the card does and computes
  * the cost the card would show at the user's prices; `costOnly` returns that
  * cost without answering the card. A fill card takes `choice: 'fill'` (its
- * default) or a decline; nothing on it is edited.
+ * default) or a decline; nothing on it is edited. `trial` approves the trial
+ * the card offers and `limit` only the plan's first rows, as the card's "Try
+ * 5 first" and "Fill first N" do.
  */
 export async function handleTestTableCardHttpRequest(request: any) {
     const pending = store.get(pendingTableCardsAtom);
@@ -651,11 +662,16 @@ export async function handleTestTableCardHttpRequest(request: any) {
     const card = pending.get(cardId);
     if (!card) return { ok: false, error: `Unknown cardId: ${cardId}`, ...currentIds() };
     const decline = request?.action === 'decline';
+    // A part the card does not offer would silently approve the whole fill.
+    if (!decline && request?.trial === true && !card.trial_rows)
+        return { ok: false, error: 'This card offers no trial', ...currentIds() };
+    if (!decline && request?.limit != null && !(card.accepts_limit && Number.isInteger(request.limit) && request.limit >= 1))
+        return { ok: false, error: 'This card takes no such limit', ...currentIds() };
 
     if (isFillCard(card)) {
         let draft = initialTableCardDraft(card);
         if (typeof request?.instructions === 'string') draft = { ...draft, instructions: request.instructions };
-        const response = decline ? tableCardDecline(draft, card) : tableFillCardResponse(card);
+        const response = decline ? tableCardDecline(draft, card) : tableFillCardResponse(card, fillPart(request));
         store.set(sendTableCardResponseAtom, response);
         return { ok: true, cardId, scope: card.scope, cost: card.cost, response, settle: await settleIfAsked(request), ...currentIds() };
     }
@@ -702,7 +718,7 @@ export async function handleTestTableCardHttpRequest(request: any) {
     if (request?.costOnly === true) return { ok: true, cardId, scope: card.scope, cost, ...currentIds() };
 
     const choice: TableCardChoice = request?.choice ?? 'create';
-    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice, cost.cost);
+    const response = decline ? tableCardDecline(draft, card) : tableCardResponse(draft, card, choice, cost.cost, fillPart(request));
     store.set(sendTableCardResponseAtom, response);
     return { ok: true, cardId, scope: card.scope, cost, response, settle: await settleIfAsked(request), ...currentIds() };
 }

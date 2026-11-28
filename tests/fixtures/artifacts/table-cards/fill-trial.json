@@ -45,6 +45,7 @@
     },
     "rereads": 26,
     "trial_rows": 5,
+    "accepts_limit": null,
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
   },

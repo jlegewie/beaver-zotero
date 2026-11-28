@@ -253,29 +253,163 @@ export function runningFillsText(balance: number, accountBalance: number | null)
     return `Fills already running may use up to ${formatCredits(held)} of your ${creditsText(account)}`;
 }
 
+/** What a fill costs and reads, as a shortfall is worked out from it. */
+export type FillCostCounts = Pick<TableFillPlanSummary, "rows" | "credits" | "documents" | "title_abstract">;
+
 /**
- * How far the balance reaches, when the fill costs more than it: "Your 6
- * credits cover about 30 of 46 papers". With running fills holding part of the
- * account's balance (`accountBalance`), it says so first: "Fills already
- * running may use up to 4.7 of your 5 credits; the rest covers about 2 of 3
- * items". Null when the balance covers it or is unknown.
+ * Prices that stand in while the real ones are unknown: the fill's credits
+ * spread over its documents (or, without any, its abstracts). A document
+ * costs at least an abstract, so that is never less than a row's price.
  */
-export function balanceLine(
-    plan: Pick<
-        TableFillPlanSummary,
-        "credits" | "balance" | "documents" | "title_abstract" | "prices"
-    >,
-    accountBalance: number | null = plan.balance,
-): string | null {
-    if (plan.balance == null || plan.credits <= plan.balance) return null;
-    const paying = plan.documents + plan.title_abstract;
-    const perPaper = paying > 0 ? plan.credits / paying : plan.prices.document;
-    const covered = perPaper > 0 ? Math.floor(plan.balance / perPaper + 1e-9) : paying;
-    const reach = `about ${Math.min(covered, paying)} of ${paying} items`;
-    const running = runningFillsText(plan.balance, accountBalance);
-    if (running) return `${running}; the rest covers ${reach}`;
-    const balance = creditsText(plan.balance);
-    return `Your ${balance} ${balance.endsWith("credit") ? "covers" : "cover"} ${reach}`;
+function boundingPrices(fill: FillCostCounts): TableFillPricing {
+    const paying = fill.documents || fill.title_abstract;
+    const price = paying > 0 ? fill.credits / paying : 0;
+    return { document: price, title_abstract: price };
+}
+
+/**
+ * The rows, counted from a fill's first, that the balance pays for whatever
+ * order its rows come in: every row is priced at the dearest price the fill
+ * pays. A lower bound, so a fill of that many rows never runs out of credits.
+ * Null when the balance covers the whole fill or is unknown; 0 when it does
+ * not reach one row at that price.
+ */
+export function affordableRowsBound(
+    fill: FillCostCounts,
+    prices: TableFillPricing | null,
+    balance: number | null,
+): number | null {
+    if (balance == null || fill.credits <= balance + 1e-9) return null;
+    const pricing = prices ?? boundingPrices(fill);
+    const dearest = Math.max(
+        fill.documents ? pricing.document : 0,
+        fill.title_abstract ? pricing.title_abstract : 0,
+    );
+    if (dearest <= 0) return null;
+    return Math.min(fill.rows - 1, Math.floor(balance / dearest + 1e-9));
+}
+
+/**
+ * The part of a fill a short balance pays for: its first `rows` rows (the
+ * limit an approval sends), shown as `items` of `of` items, costing at most
+ * `credits`.
+ */
+export interface AffordablePart {
+    rows: number;
+    items: number;
+    of: number;
+    credits: number;
+}
+
+/** A balance that does not cover a fill, as a card or popover warns about it. */
+export interface BalanceShortfall {
+    /** The warning: what the balance covers, or that the fill stops when it runs out. */
+    text: string;
+    /** The balance cannot pay for a single item: the fill would stop before answering anything. */
+    blocked: boolean;
+    /** Rows from the fill's first that the balance surely pays for (0: not even the first); null when unknown. */
+    affordable: number | null;
+    /** The part the balance pays for, when the surface can fill only that (`partial`); null otherwise. */
+    part: AffordablePart | null;
+}
+
+/** How {@link balanceShortfall} reads the balance's reach. */
+export interface ShortfallOptions {
+    /** The account's balance, when `balance` is less what running fills may still charge. */
+    accountBalance?: number | null;
+    /** The surface can fill only the part the balance pays for: the warning then names it. */
+    partial?: boolean;
+    /**
+     * The part the balance pays for, exactly (a kept plan's own rows), in the
+     * plan's items read; asked for only once the balance falls short. Null,
+     * or absent, falls back to {@link affordableRowsBound}, in rows.
+     */
+    exactPart?: () => Omit<AffordablePart, "of"> | null;
+}
+
+/**
+ * The warning when the balance does not cover a fill. Where the surface can
+ * fill only the part the balance pays for (`partial`): "Your 1.6 credits
+ * cover 8 of 23 items. The rest can be filled once you add credits."
+ * Otherwise: "This fill needs 3.5 credits and you have 1.6. It stops when
+ * your credits run out." With running fills holding part of the account's
+ * balance, it says so. A balance short of one item is `blocked`, with
+ * {@link noCreditsText}. Null when the balance covers the fill or is unknown.
+ */
+export function balanceShortfall(
+    fill: FillCostCounts,
+    prices: TableFillPricing | null,
+    balance: number | null,
+    { accountBalance = balance, partial = false, exactPart }: ShortfallOptions = {},
+): BalanceShortfall | null {
+    if (balance == null || fill.credits <= balance + 1e-9) return null;
+    // Without the prices, a mixed fill's cheapest item is unknown: it may
+    // still pay for an abstract, so it is not blocked.
+    const pricing = prices ?? boundingPrices(fill);
+    const noCredits =
+        prices || !(fill.documents && fill.title_abstract)
+            ? noCreditsText({ ...fill, prices: pricing }, balance, accountBalance)
+            : null;
+    if (noCredits) return { text: noCredits, blocked: true, affordable: null, part: null };
+    const exact = exactPart?.();
+    let part: AffordablePart | null = null;
+    let affordable: number | null;
+    // Shown in the items the fill reads, as its receipt counts them.
+    const read = fill.documents + fill.title_abstract || fill.rows;
+    if (exact && exact.rows < fill.rows) {
+        affordable = exact.rows;
+        if (exact.rows > 0) part = { ...exact, of: read };
+    } else {
+        affordable = affordableRowsBound(fill, prices, balance);
+        const dearest = Math.max(fill.documents ? pricing.document : 0, fill.title_abstract ? pricing.title_abstract : 0);
+        // The bound's rows may include an item that is not read, so the items
+        // it names are at most what the part reads.
+        if (affordable)
+            part = {
+                rows: affordable,
+                items: Math.min(affordable, read),
+                of: read,
+                credits: Math.min(balance, affordable * dearest),
+            };
+    }
+    const running = runningFillsText(balance, accountBalance);
+    if (partial && part) {
+        const covers = `${part.items.toLocaleString("en-US")} of ${count(part.of, "item")}`;
+        const head = running ? `${running}; the rest covers ${covers}.` : `Your ${creditsText(balance)} ${creditsText(balance).endsWith("credit") ? "covers" : "cover"} ${covers}.`;
+        return { text: `${head} The rest can be filled once you add credits.`, blocked: false, affordable, part };
+    }
+    const needs = `This fill needs ${creditsText(fill.credits)}`;
+    const head = running ? `${needs}. ${running}.` : `${needs} and you have ${formatCredits(balance)}.`;
+    return { text: `${head} It stops when your credits run out.`, blocked: false, affordable, part: null };
+}
+
+/**
+ * The trial a card or popover offers beside a fill, given its shortfall: none
+ * when the balance cannot pay for one item or runs out within the trial, or
+ * when the partial fill it offers instead is no larger.
+ */
+export function trialWithinBalance(trialRows: number | null, shortfall: BalanceShortfall | null): number | null {
+    if (!trialRows || shortfall?.blocked) return null;
+    const affordable = shortfall?.affordable;
+    if (affordable == null) return trialRows;
+    return affordable > trialRows || (affordable === trialRows && !shortfall?.part) ? trialRows : null;
+}
+
+/** The primary button of a fill the balance covers only in part: "Fill 8 of 23". */
+export function fillPartLabel(part: AffordablePart): string {
+    return `Fill ${part.items.toLocaleString("en-US")} of ${part.of.toLocaleString("en-US")}`;
+}
+
+/**
+ * What filling a column added or asked anew would cost, in the column
+ * editor: "Filling this column reads 200 items again: up to 70 credits. Add
+ * your other columns first; one fill answers them all." Every row is counted
+ * at the document price, so it is an upper bound. Null without rows or prices.
+ */
+export function columnFillCostText(rows: number, prices: TableFillPricing | null, again: boolean): string | null {
+    if (rows <= 0 || !prices) return null;
+    const credits = rows * Math.max(prices.document, prices.title_abstract);
+    return `Filling this column reads ${count(rows, "item")}${again ? " again" : ""}: up to ${creditsText(credits)}. Add your other columns first; one fill answers them all.`;
 }
 
 /** The price of the cheapest item a plan pays for; null when it pays for none. */
@@ -298,7 +432,7 @@ function cheapestItem(
  * is unknown, or the plan costs nothing.
  */
 export function noCreditsText(
-    plan: Pick<TableFillPlanSummary, "credits" | "documents" | "title_abstract" | "prices">,
+    plan: Pick<TableFillPlanSummary, "credits" | "documents" | "title_abstract"> & { prices: TableFillPricing },
     balance: number | null,
     /** The account's balance, when `balance` is less what running fills may still charge. */
     accountBalance: number | null = balance,

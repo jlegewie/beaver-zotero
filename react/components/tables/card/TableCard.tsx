@@ -18,6 +18,7 @@ import {
     createRunOption,
     columnProblem,
     createBlocker,
+    createCardTrialRows,
     createBlockerReason,
     cardDestination,
     destinationLine,
@@ -56,10 +57,12 @@ import {
     undoRemoveItem,
     updateColumn,
     type DraftSource,
+    type FillPart,
     type TableCardDraft,
     type TableCardStep,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { MAX_MODEL_COLUMNS } from '@beaver/agent-core/layouts/table';
+import { trialWithinBalance } from '@beaver/agent-core/run-state/tableFillCopy';
 import { useAddSourcesMenu, type AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { ArrowLeftIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -84,7 +87,7 @@ import {
     TableIcon,
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
-import { TableCardFillWarnings, TableCardReceipt, useFillPricing, useShortWindow } from './TableCardCost';
+import { TableCardFillWarnings, TableCardReceipt, useCardBalanceShortfall, useFillPricing, useShortWindow } from './TableCardCost';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
 import type { SourceEntry } from '@beaver/agent-core/layouts/table';
@@ -545,30 +548,40 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     );
     const blockerReason = createBlockerReason(draft, request, libraryOf);
     const blocker = blockerReason?.message ?? null;
-    // The run checkbox, when there is something to run, and what Create table sends.
-    const runOption = createRunOption(draft, request);
-    const choice = createChoice(draft, request);
-    const fillNow = choice === 'create_and_run';
-
     // The cost of filling: the backend's for the proposal as sent, then
     // computed here from the edited sources at the user's prices.
     const prices = useFillPricing();
     const shortWindow = useShortWindow();
     const { cost, upperBound } = draftCost(draft, request, prices);
+
+    // The run checkbox, when there is something to run, and what Create table
+    // sends. An exact cost the balance falls short of is a shortfall; where the
+    // backend takes a limit, the run is then the part the balance pays for
+    // ("Fill the first 8 items now"), and Create table starts only that.
+    const choice = createChoice(draft, request);
+    const fillNow = choice === 'create_and_run';
+    const runCost = fillNow && cost && !upperBound ? cost : null;
+    const shortfall = useCardBalanceShortfall(runCost, prices, !!request.accepts_limit);
+    const part = shortfall?.part ?? null;
+    const runOption = part
+        ? `Fill the first ${part.items.toLocaleString('en-US')} items now`
+        : createRunOption(draft, request);
+    // The trial, for a large fill the balance can finish it for.
+    const trialRows = fillNow ? trialWithinBalance(createCardTrialRows(request, cost), shortfall) : null;
     // An edit the card cannot price yet (prices still loading, or unavailable)
     // holds back the run; unticking the checkbox still creates the table.
     const runUnpriced = !!request.cost && draft.columns.length > 0 && !cost;
     const hasInstructions = draft.instructions.trim().length > 0;
 
     const decide = useCallback(
-        (choice: TableCardChoice | null) => {
+        (choice: TableCardChoice | null, part: FillPart = {}) => {
             if (decidedRef.current || disabled) return;
             if (choice && createBlocker(draft, request, libraryOf)) return;
             if (choice === 'create_and_run' && runUnpriced) return;
             decidedRef.current = true;
             setIsDecided(true);
             onSubmit(
-                choice ? tableCardResponse(draft, request, choice, cost) : tableCardDecline(draft, request),
+                choice ? tableCardResponse(draft, request, choice, cost, part) : tableCardDecline(draft, request),
             );
         },
         [cost, disabled, draft, libraryOf, onSubmit, request, runUnpriced],
@@ -869,7 +882,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     // scroll at the end of the content, so the footer leaves the step room.
     const held = disabled && !!heldCaption;
     const blocked = isLast && !!blockerReason && !disabled;
-    const fillFacts = isLast && !held && !blocked && fillNow && cost && !upperBound ? cost : null;
+    const fillFacts = isLast && !held && !blocked ? runCost : null;
+    const fillWarnings = (inBody: boolean) =>
+        fillFacts ? (
+            <TableCardFillWarnings cost={fillFacts} shortfall={shortfall} inBody={inBody} />
+        ) : null;
     // Only on Sources, where papers are added.
     const fewPapers = !held && draft.step === 'sources' ? singlePaperHint(draft, request) : null;
     const bands = held ? (
@@ -895,7 +912,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             )}
         </div>
     ) : fillFacts && !shortWindow ? (
-        <TableCardFillWarnings cost={fillFacts} prices={prices} />
+        fillWarnings(false)
     ) : fewPapers ? (
         <div className="table-card-footer-band font-color-secondary" role="status">
             <Icon icon={InformationCircleIcon} className="table-card-warning-icon" />
@@ -923,7 +940,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
             {!fillNow ? (
                 <span className="table-card-receipt table-card-receipt-quiet">No credits used yet</span>
             ) : cost ? (
-                <TableCardReceipt cost={cost} upperBound={upperBound} prices={prices} disabled={locked} />
+                <TableCardReceipt cost={cost} upperBound={upperBound} prices={prices} disabled={locked} part={part} />
             ) : runUnpriced ? (
                 <span className="table-card-receipt table-card-receipt-quiet">Waiting for the price</span>
             ) : null}
@@ -1058,7 +1075,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                     {draft.step === 'sources' ? sourcesStep : draft.step === 'screening' ? screeningStep : columnsStep}
                 </div>
                 {/* In a short window the fill's warnings scroll at the end of the content. */}
-                {fillFacts && shortWindow && <TableCardFillWarnings cost={fillFacts} prices={prices} inBody />}
+                {shortWindow && fillWarnings(true)}
             </div>
 
             <div className="table-card-footer table-card-footer-stack">
@@ -1102,9 +1119,21 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                             Next
                         </Button>
                     ) : (
+                        <>
+                        {trialRows && !blocker && (
+                            <Button
+                                variant="ghost-secondary"
+                                onClick={() => decide('create_and_run', { trial: true })}
+                                disabled={locked || runUnpriced}
+                                title={`Create the table and fill its first ${trialRows} rows to check the answers`}
+                                className="flex-none whitespace-nowrap"
+                            >
+                                Try {trialRows} first
+                            </Button>
+                        )}
                         <Button
                             variant="solid"
-                            onClick={() => decide(choice)}
+                            onClick={() => decide(choice, fillNow && part ? { limit: part.rows } : {})}
                             disabled={locked || !!blocker || (fillNow && runUnpriced)}
                             title={
                                 blocker ??
@@ -1119,6 +1148,7 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
                         >
                             {CREATE_TABLE_LABEL}
                         </Button>
+                        </>
                     )}
                 </div>
             </div>

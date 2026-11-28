@@ -5089,8 +5089,35 @@
     color: var(--tag-orange-secondary);
 }
 
-[id^="beaver-pane-"] .table-card-footer-band-warning .table-card-warning-action {
+[id^="beaver-pane-"] .table-card-footer-band-warning .table-card-warning-action,
+[id^="beaver-pane-"] .table-card-footer-band-error .table-card-warning-action {
     font-weight: 600;
+}
+
+/* The footer shows at most one fact band, a full-width strip between the
+ * content and the decision. Its kind is in its tint and icon, not in extra
+ * rules: the strip keeps the footer's own divider below it.
+ *
+ * Red: the balance does not cover the fill. The text keeps the primary color
+ * to stay legible; the tint and the icon carry the red. */
+[id^="beaver-pane-"] .table-card-footer-band-error {
+    background: var(--tag-red-quinary);
+    color: var(--fill-primary);
+}
+
+[id^="beaver-pane-"] .table-card-footer-band-error .table-card-warning-icon {
+    color: var(--tag-red-primary);
+}
+
+/* Grey: worth knowing before the fill, no action needed. */
+[id^="beaver-pane-"] .table-card-footer-band-info {
+    color: var(--fill-secondary);
+}
+
+[id^="beaver-pane-"] .table-card-footer-band-error .table-card-warning-action:disabled {
+    opacity: 0.5;
+    cursor: default;
+    text-decoration: none;
 }
 
 /* In a short window the fill warnings close the scrolling content instead,
@@ -5256,8 +5283,9 @@
 [id^="beaver-pane-"] .table-card-controls {
     display: flex;
     flex-direction: row;
+    flex-wrap: wrap;
     align-items: center;
-    gap: 0.25rem;
+    gap: 0.35rem 0.25rem;
     min-width: 0;
     padding: 0.55rem 0.8rem 0.65rem;
 }

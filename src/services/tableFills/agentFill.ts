@@ -103,7 +103,7 @@ export class AgentTableFills {
     /**
      * `fill_plan`: a plan for the table, kept by the service under its id.
      * With `plan_id` and `limit`, the trial of that plan: its first `limit`
-     * rows (the fill card's "Try 5 first").
+     * rows (a card's "Try 5 first", or the rows the balance pays for).
      */
     async plan(request: ArtifactRequest, target: TableFillTarget): Promise<ArtifactResponse> {
         const scope: TableFillScope =

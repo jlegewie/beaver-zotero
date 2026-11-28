@@ -31,7 +31,7 @@ import {
     normalizeSelectLabel,
 } from '../layouts/table';
 import type { TableFillPricing } from '../protocol/tableFillProtocol';
-import { balanceLine, creditsText, formatCredits, runningFillsText } from './tableFillCopy';
+import { creditsText, formatCredits } from './tableFillCopy';
 
 export type TableCardStep = 'sources' | 'screening' | 'columns';
 
@@ -829,14 +829,38 @@ export function wireColumn(column: DraftColumn): TableCardColumn {
 }
 
 /**
+ * Which part of a fill an approval starts: the trial the card offered, or
+ * only the plan's first `limit` rows (the rows the balance pays for).
+ * Nothing for the whole fill.
+ */
+export interface FillPart {
+    trial?: boolean;
+    limit?: number;
+}
+
+/**
+ * The reply's fields for `part`: only a trial the request offered, and a
+ * limit only to a backend that takes one; an older backend would fill
+ * everything.
+ */
+function fillPartFields(request: WSTableCardRequest, part: FillPart): Pick<WSTableCardResponse, 'trial' | 'limit'> {
+    if (part.trial && typeof request.trial_rows === 'number' && request.trial_rows > 0) return { trial: true };
+    const limit = Math.floor(part.limit ?? 0);
+    if (limit >= 1 && request.accepts_limit) return { limit };
+    return {};
+}
+
+/**
  * The approval: every part as edited, and the choice. Creating with the run
- * names the cost the card showed, which bounds the fill it starts.
+ * names the cost the card showed, which bounds the fill it starts, and
+ * `part`, a trial or a limit, when only the first rows are to be filled.
  */
 export function tableCardResponse(
     draft: TableCardDraft,
     request: WSTableCreateCardRequest,
     choice: TableCardChoice,
     cost: TableCardCost | null = null,
+    part: FillPart = {},
 ): WSTableCardResponse {
     // Instructions travel only with a decline: an approval is the table as shown.
     return {
@@ -844,7 +868,7 @@ export function tableCardResponse(
         card_id: request.card_id,
         approved: true,
         choice,
-        ...(choice === 'create_and_run' && cost ? { cost } : {}),
+        ...(choice === 'create_and_run' && cost ? { cost, ...fillPartFields(request, part) } : {}),
         title: draft.title.trim(),
         description: draft.description.trim(),
         sources: draft.sources.flatMap((source): TableCardSource[] => {
@@ -858,16 +882,16 @@ export function tableCardResponse(
 
 /**
  * The approval of a fill card: nothing on it is editable, so it names only
- * the run. It approves exactly the plan the card shows.
+ * the run. It approves exactly the plan the card shows, or the first rows of
+ * it (`part`).
  */
-export function tableFillCardResponse(request: WSTableFillCardRequest, trial = false): WSTableCardResponse {
+export function tableFillCardResponse(request: WSTableFillCardRequest, part: FillPart = {}): WSTableCardResponse {
     return {
         type: 'table_card_response',
         card_id: request.card_id,
         approved: true,
         choice: 'fill',
-        // Only a trial the request offered: an older backend would fill everything.
-        ...(trial && fillCardTrialRows(request) ? { trial: true } : {}),
+        ...fillPartFields(request, part.trial && !fillCardTrialRows(request) ? {} : part),
     };
 }
 
@@ -875,6 +899,20 @@ export function tableFillCardResponse(request: WSTableFillCardRequest, trial = f
 export function fillCardTrialRows(request: WSTableFillCardRequest): number | null {
     const rows = request.trial_rows;
     return typeof rows === 'number' && rows > 0 && request.cost.rows > rows ? rows : null;
+}
+
+/** A create card offers its trial only for a fill at least this large. */
+export const CREATE_TRIAL_MIN_ROWS = 20;
+
+/**
+ * The rows the create card's trial fills; null when the request offers none
+ * or the fill is too small for one to help.
+ */
+export function createCardTrialRows(request: WSTableCreateCardRequest, cost: TableCardCost | null): number | null {
+    const rows = request.trial_rows;
+    return typeof rows === 'number' && rows > 0 && cost && cost.rows >= Math.max(CREATE_TRIAL_MIN_ROWS, rows + 1)
+        ? rows
+        : null;
 }
 
 /** The fill card's one primary button. */
@@ -1007,39 +1045,4 @@ export function costBreakdown(cost: TableCardCost, prices: TableFillPricing | nu
         rows.push({ label: 'Abstract only', papers: plural(cost.title_abstract, 'item'), rate: each(prices?.title_abstract) });
     if (cost.no_input) rows.push({ label: 'Skipped', papers: plural(cost.no_input, 'item'), rate: 'free' });
     return rows;
-}
-
-/**
- * The warning when the balance does not cover the fill: "Your 6 credits cover
- * about 30 of 46 papers." When that estimate would be "about 0", "Your 0.1
- * credits aren't enough to fill these papers." Null when the balance covers
- * the fill, or is unknown. A fill stops at the first paper it cannot pay for.
- */
-export function balanceNotice(
-    cost: TableCardCost,
-    balance: number | null,
-    prices: TableFillPricing | null,
-    /** The account's balance, when `balance` is less what running fills may still charge. */
-    accountBalance: number | null = balance,
-): string | null {
-    const reach = balanceLine(
-        {
-            credits: cost.credits,
-            balance,
-            documents: cost.documents,
-            title_abstract: cost.title_abstract,
-            prices: prices ?? { document: cost.credits, title_abstract: cost.credits },
-        },
-        accountBalance,
-    );
-    if (!reach || balance == null) return null;
-    const paying = cost.documents + cost.title_abstract;
-    // The same average per paper the estimate uses.
-    const perPaper = paying > 0 ? cost.credits / paying : Infinity;
-    if (balance + 1e-9 >= perPaper) return `${reach}.`;
-    const these = paying === 1 ? 'this item' : 'these items';
-    const running = runningFillsText(balance, accountBalance);
-    if (running) return `${running}; the rest isn't enough to fill ${these}.`;
-    const text = creditsText(balance);
-    return `Your ${text} ${text.endsWith('credit') ? "isn't" : "aren't"} enough to fill ${these}.`;
 }

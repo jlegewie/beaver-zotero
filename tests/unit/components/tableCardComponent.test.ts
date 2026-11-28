@@ -30,12 +30,16 @@ const mocks = vi.hoisted(() => ({
     openPreferencesWindow: vi.fn(),
     /** Whether the card's window reads as short (max-height: 500px). */
     shortWindow: false,
+    /** The account's credit balance. */
+    balance: 6,
 }));
 
 // The card's window answers the short-window media query from `mocks.shortWindow`.
 vi.mock('../../../react/runtime/SurfaceWindowContext', () => ({
     useSurfaceWindow: () => ({
         matchMedia: () => ({ matches: mocks.shortWindow, addEventListener: () => {}, removeEventListener: () => {} }),
+        addEventListener: () => {},
+        removeEventListener: () => {},
     }),
 }));
 
@@ -57,7 +61,7 @@ vi.mock('../../../react/atoms/profile', async () => {
     return {
         searchableLibraryIdsAtom: atom([1, 5]),
         profileWithPlanAtom: atom({ available_subscription_credits: 5, available_purchased_credits: 1 }),
-        remainingBeaverCreditsAtom: atom(6),
+        remainingBeaverCreditsAtom: atom(() => mocks.balance),
     };
 });
 
@@ -1159,13 +1163,78 @@ describe('TableCard', () => {
         it('warns when the balance does not reach, with a way to add credits', async () => {
             render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
             await click('Next');
-            const warning = container.querySelector('.table-card-footer-band[role="alert"]');
-            expect(warning?.textContent).toContain('Your 6 credits cover about 30 of 46 items.');
+            const warning = container.querySelector('.table-card-footer-band-error[role="alert"]');
+            // This backend takes no limit: the fill can only stop partway.
+            expect(warning?.textContent).toContain('This fill needs 9.2 credits and you have 6. It stops when your credits run out.');
+            expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the table now');
             await click('Add credits');
             expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
             // Creating without the fill costs nothing, so the warning goes.
             await clickElement(runOption());
             expect(container.querySelector('.table-card-footer-band')).toBeNull();
+        });
+
+        it('runs only the part a short balance pays for, as the decision row says', async () => {
+            const request = costedFixture('create-trial');
+            render({ ...request, cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
+            await click('Next');
+            // One band, red, with the way to credits; no fill action in it.
+            expect(bands()).toEqual(['Your 6 credits cover 30 of 46 items. The rest can be filled once you add credits.Add credits']);
+            expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the first 30 items now');
+            expect(receipt()).toBe('30 of 46 items · up to 6 credits');
+            // Thirty rows: the five-row trial still fits.
+            expect(controls()).toEqual(['Cancel', 'Back', 'Try 5 first', 'Create table']);
+            await click('Create table');
+            expect(sent).toHaveLength(1);
+            expect(sent[0]).toMatchObject({ choice: 'create_and_run', limit: 30 });
+            expect(sent[0]).not.toHaveProperty('trial');
+        });
+
+        it('offers Try 5 first beside Create table for a large fill, and sends the trial', async () => {
+            const { request, reply } = read('create-trial');
+            render(request);
+            await click('Next');
+            expect(bands()).toEqual([]);
+            expect(controls()).toEqual(['Cancel', 'Back', 'Try 5 first', 'Create table']);
+            await click('Try 5 first');
+            expect(sent).toEqual([reply]);
+        });
+
+        it('leaves the trial out for a small fill, a run left unticked, or a balance that cannot finish it', async () => {
+            const request = costedFixture('create-trial');
+            render({ ...request, cost: { rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 } });
+            await click('Next');
+            expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
+            act(() => root?.unmount());
+            render(request);
+            await click('Next');
+            await clickElement(runOption());
+            expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
+            act(() => root?.unmount());
+            mocks.balance = 0.6;
+            try {
+                render(request);
+                await click('Next');
+                expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the first 3 items now');
+                expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
+            } finally {
+                mocks.balance = 6;
+            }
+        });
+
+        it('warns in red when the balance cannot pay for one item, and still creates and fills as ticked', async () => {
+            mocks.balance = 0;
+            try {
+                render(costedFixture('create-trial'));
+                await click('Next');
+                const warning = container.querySelector('.table-card-footer-band-error')!;
+                expect(warning.textContent).toBe('Filling uses Beaver credits: 0.2 per item. You have 0 credits.Get credits');
+                expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
+                await click('Create table');
+                expect(sent[0].choice).toBe('create_and_run');
+            } finally {
+                mocks.balance = 6;
+            }
         });
 
         it('in a short window, scrolls the fill warnings with the step and keeps the decision pinned', async () => {
@@ -1174,8 +1243,10 @@ describe('TableCard', () => {
                 render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 44, title_abstract: 2, no_input: 0, credits: 9.2 } });
                 await click('Next');
                 const footer = container.querySelector('.table-card-footer')!;
-                const inBody = container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band-warning');
-                expect(inBody).toHaveLength(2);
+                // One band: the short balance, in red.
+                const inBody = container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band');
+                expect(inBody).toHaveLength(1);
+                expect(inBody[0].className).toContain('table-card-footer-band-error');
                 expect(footer.querySelector('.table-card-footer-band')).toBeNull();
                 expect(footer.querySelector('.table-card-decision')).not.toBeNull();
             } finally {
@@ -1354,12 +1425,15 @@ describe('TableCard', () => {
             // The decision row: what Fill table covers, and the receipt.
             expect(container.querySelector('.table-card-decision-label')?.textContent).toBe('Fill 2 columns');
             expect(container.querySelector('.table-card-receipt')?.textContent).toBe('32 items · 6.1 credits');
-            // Bands: the balance (6) does not cover the plan, and two items have no full text.
-            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
-            expect(bands).toHaveLength(2);
-            expect(bands[0]).toContain('Your 6 credits cover about');
-            expect(bands[0]).toContain('Add credits');
-            expect(bands[1]).toContain('2 items have no full text and are read from their abstracts.');
+            // One band: the balance (6) does not cover the plan, in red. The two
+            // items without full text wait for a band of their own until it does.
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band'));
+            expect(bands).toHaveLength(1);
+            expect(bands[0].className).toContain('table-card-footer-band-error');
+            // This backend takes no limit: the fill can only stop partway.
+            expect(bands[0].textContent).toContain('This fill needs 6.1 credits and you have 6. It stops when your credits run out.');
+            expect(bands[0].textContent).toContain('Add credits');
+            expect(controls()).toEqual(['Cancel', 'Fill table']);
             await click('Add credits');
             expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
             // Nothing on it is editable.
@@ -1385,7 +1459,7 @@ describe('TableCard', () => {
             try {
                 renderFill(request);
                 const footer = container.querySelector('.table-card-footer')!;
-                expect(container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band-warning')).toHaveLength(2);
+                expect(container.querySelectorAll('.table-card-body .table-card-body-bands .table-card-footer-band')).toHaveLength(1);
                 expect(footer.querySelector('.table-card-footer-band')).toBeNull();
                 expect(footer.querySelector('.table-card-decision')).not.toBeNull();
                 act(() => root?.unmount());
@@ -1412,7 +1486,7 @@ describe('TableCard', () => {
             renderFill(request, { disabled: true, heldCaption: 'You can answer as soon as Beaver reconnects.', onStop });
             expect(container.querySelector('.table-card-footer-band-pending')?.textContent).toContain('as soon as Beaver reconnects');
             // The held band replaces the warnings.
-            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(container.querySelector('.table-card-footer-band-error')).toBeNull();
             expect(button('Fill table')).toBeUndefined();
             await click('Stop');
             expect(onStop).toHaveBeenCalled();
@@ -1422,7 +1496,7 @@ describe('TableCard', () => {
         it('says a changed column reads every paper again, and approves only the trial with Try 5 first', async () => {
             const { request, reply } = read('fill-trial');
             renderFill(request);
-            const bands = Array.from(container.querySelectorAll('.table-card-footer-band-warning')).map((band) => band.textContent);
+            const bands = Array.from(container.querySelectorAll('.table-card-footer-band')).map((band) => band.textContent);
             expect(bands).toEqual([
                 'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.',
             ]);
@@ -1432,6 +1506,27 @@ describe('TableCard', () => {
             expect(sent).toEqual([reply]);
             // One answer per card.
             expect(button('Fill table')!.disabled).toBe(true);
+        });
+
+        it('shows one band: the short balance over the refill alert, the refill alert over items without full text', () => {
+            const { request } = read('fill-trial');
+            const mixed = { ...request, cost: { rows: 26, documents: 20, title_abstract: 6, no_input: 0, credits: 4.3 } };
+            renderFill(mixed);
+            expect([...container.querySelectorAll('.table-card-footer-band')].map((band) => band.textContent)).toEqual([
+                'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first, then try 5 rows to check the answers.',
+            ]);
+            act(() => root?.unmount());
+            mocks.balance = 2;
+            try {
+                renderFill(mixed);
+                const shown = container.querySelectorAll('.table-card-footer-band');
+                expect(shown).toHaveLength(1);
+                expect(shown[0].className).toContain('table-card-footer-band-error');
+                // Without the alert beside it, the trial is quiet again.
+                expect(button('Try 5 first')!.className).toContain('variant-ghost-secondary');
+            } finally {
+                mocks.balance = 6;
+            }
         });
 
         it('fills the whole plan with Fill table when a trial is on offer', async () => {
@@ -1444,7 +1539,7 @@ describe('TableCard', () => {
         it('without a trial on offer, leaves it out of the alert and the controls', () => {
             const { request } = read('fill-trial');
             renderFill({ ...request, trial_rows: null });
-            expect(container.querySelector('.table-card-footer-band-warning')?.textContent).toBe(
+            expect(container.querySelector('.table-card-footer-band')?.textContent).toBe(
                 'Each paper is read again, so filling one column costs as much as filling all of them. Finish your column changes first.',
             );
             expect(controls()).toEqual(['Cancel', 'Fill table']);
@@ -1453,8 +1548,59 @@ describe('TableCard', () => {
         it('keeps the trial quiet, without the alert, on a fill that reads no answered paper again', () => {
             const { request } = read('fill-trial');
             renderFill({ ...request, rereads: 0 });
-            expect(container.querySelector('.table-card-footer-band-warning')).toBeNull();
+            expect(container.querySelector('.table-card-footer-band')).toBeNull();
             expect(button('Try 5 first')!.className).toContain('variant-ghost-secondary');
+        });
+
+        it('fills only the part a short balance pays for with its primary button', async () => {
+            const { request, reply } = read('fill-limit');
+            mocks.balance = 1.45;
+            try {
+                renderFill(request);
+                const band = container.querySelector('.table-card-footer-band-error')!;
+                // Every row priced as a document (6.1 / 30 at most), the balance surely pays for 7 rows.
+                expect(band.textContent).toContain('Your 1.45 credits cover 7 of 32 items. The rest can be filled once you add credits.');
+                expect(container.querySelector('.table-card-receipt')?.textContent).toBe('7 of 32 items · up to 1.42 credits');
+                expect(controls()).toEqual(['Cancel', 'Try 5 first', 'Fill 7 of 32']);
+                await click('Fill 7 of 32');
+                expect(sent).toEqual([reply]);
+            } finally {
+                mocks.balance = 6;
+            }
+        });
+
+        it('drops a trial the balance cannot finish', () => {
+            const { request } = read('fill-limit');
+            mocks.balance = 1;
+            try {
+                renderFill(request);
+                expect(controls()).toEqual(['Cancel', 'Fill 4 of 32']);
+            } finally {
+                mocks.balance = 6;
+            }
+        });
+
+        it('offers the way to credits in place of Fill when the balance cannot pay for one item', async () => {
+            const { request } = read('fill-limit');
+            mocks.balance = 0.01;
+            try {
+                renderFill(request);
+                // Before the prices are known a mixed fill might still pay for an abstract.
+                expect(controls()).toContain('Fill table');
+                (globalThis as any).Zotero.Beaver = { tableFills: { pricing: async () => ({ document: 0.2, title_abstract: 0.05 }) } };
+                act(() => root?.unmount());
+                await act(async () => renderFill(request));
+                expect(container.querySelector('.table-card-footer-band-error')?.textContent).toBe(
+                    'Filling uses Beaver credits: 0.2 per item. You have 0.01 credits.',
+                );
+                expect(controls()).toEqual(['Cancel', 'Add credits']);
+                await click('Add credits');
+                expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
+                expect(sent).toEqual([]);
+            } finally {
+                mocks.balance = 6;
+                delete (globalThis as any).Zotero.Beaver;
+            }
         });
 
         it('declines with instructions from the cancel view', async () => {
