@@ -67,7 +67,11 @@ export function createSidebarMount(doc: Document) {
     // on exactly the elements that carry a `beaver-pane-*` id or the
     // utility layer stops matching inside this pane.
     mountPoint.setAttribute('class', 'beaver-root display-flex flex-1 h-full min-w-0');
-    mountPoint.setAttribute('style', 'min-width: 0px; display: none;');
+    // The pane gives the sidebar its width. Without inline-size containment
+    // the content's min-content width would raise the pane row's minimum
+    // width, so a narrow window would cut the sidebar off instead of
+    // shrinking it to the pane's minimum.
+    mountPoint.setAttribute('style', 'min-width: 0px; contain: inline-size; display: none;');
 
     const reactContainer = doc.createElement('div');
     reactContainer.setAttribute('id', SIDEBAR_ROOT_ID);

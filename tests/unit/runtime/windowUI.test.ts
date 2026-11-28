@@ -364,12 +364,14 @@ describe('one sidebar for library and reader tabs', () => {
         const { uiManager, itemPane, contextPane, done } = await setup();
 
         uiManager.updateUI({ isVisible: true, isLibraryTab: true });
-        expect(itemPane.style.width).toBe('420px');
+        expect(itemPane.style.flexBasis).toBe('420px');
+        // A length would count toward the row's minimum width and be where a drag starts.
+        expect(itemPane.style.width).toBe('-moz-available');
         expect(itemPane.getAttribute('width')).toBe('337');
 
         uiManager.updateUI({ isVisible: true, isLibraryTab: false });
         expect(itemPane.style.width).toBe('337px');
-        expect(contextPane.style.width).toBe('420px');
+        expect(contextPane.style.flexBasis).toBe('420px');
         expect(contextPane.getAttribute('width')).toBe('600');
 
         uiManager.updateUI({ isVisible: false, isLibraryTab: false });
@@ -377,18 +379,32 @@ describe('one sidebar for library and reader tabs', () => {
         done();
     });
 
-    it('lets the other side of the splitter give way before the sidebar shrinks, and gives the pane its flex back', async () => {
+    it('keeps the sidebar content from raising the pane row\'s minimum width', async () => {
+        const { mount, done } = await setup();
+        // The content's min-content width would otherwise hold the pane above its minimum.
+        expect(mount.style.contain).toBe('inline-size');
+        done();
+    });
+
+    it('lets the other side of the splitter give way before the sidebar shrinks, and gives both their flex back', async () => {
         prefs.values.sidebarWidth = 420;
-        const { uiManager, itemPane, contextPane, done } = await setup();
+        const { win, uiManager, itemPane, contextPane, done } = await setup();
         itemPane.style.flexShrink = '2';
+        const deck = win.document.createElement('div');
+        deck.style.flexShrink = '3';
+        contextPane.before(deck, win.document.createElement('splitter'));
 
         uiManager.updateUI({ isVisible: true, isLibraryTab: true });
-        expect(itemPane.style.flexShrink).toBe('0.001');
+        expect(itemPane.style.flexShrink).toBe('1');
         uiManager.updateUI({ isVisible: true, isLibraryTab: false });
         expect(itemPane.style.flexShrink).toBe('2');
-        expect(contextPane.style.flexShrink).toBe('0.001');
+        // The pane's must not drop below 1, or it never takes the overflow the
+        // neighbour leaves once at its minimum; the neighbour's is far larger.
+        expect(contextPane.style.flexShrink).toBe('1');
+        expect(deck.style.flexShrink).toBe('1000');
         uiManager.updateUI({ isVisible: false, isLibraryTab: false });
         expect(contextPane.style.flexShrink).toBe('');
+        expect(deck.style.flexShrink).toBe('3');
         done();
     });
 
@@ -399,11 +415,11 @@ describe('one sidebar for library and reader tabs', () => {
         uiManager.updateUI({ isVisible: true, isLibraryTab: true });
 
         await drag(win, itemPane, 480);
-        expect(itemPane.style.width).toBe('480px');
+        expect(itemPane.style.flexBasis).toBe('480px');
         expect(itemPane.getAttribute('width')).toBe('337');
 
         uiManager.updateUI({ isVisible: true, isLibraryTab: false });
-        expect(contextPane.style.width).toBe('480px');
+        expect(contextPane.style.flexBasis).toBe('480px');
         await new Promise(resolve => setTimeout(resolve, 300));
         expect(setPref).toHaveBeenCalledWith('sidebarWidth', 480);
         done();
@@ -421,7 +437,7 @@ describe('one sidebar for library and reader tabs', () => {
         contextPane.setAttribute('width', '460');
         contextPane.style.width = '460px';
         await settle();
-        expect(contextPane.style.width).toBe('460px');
+        expect(contextPane.style.flexBasis).toBe('460px');
         expect(contextPane.getAttribute('width')).toBe('600');
         done();
     });
@@ -461,7 +477,7 @@ describe('one sidebar for library and reader tabs', () => {
         await settle();
         splitter.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
         await settle();
-        expect(contextPane.style.width).toBe('460px');
+        expect(contextPane.style.width).toBe('-moz-available');
         expect(contextPane.style.flexBasis).toBe('460px');
 
         uiManager.updateUI({ isVisible: false, isLibraryTab: false });
@@ -482,7 +498,7 @@ describe('one sidebar for library and reader tabs', () => {
         itemPane.before(itemsPane, splitter);
 
         uiManager.updateUI({ isVisible: true, isLibraryTab: true });
-        expect(itemPane.style.width).toBe('780px');
+        expect(itemPane.style.flexBasis).toBe('780px');
         expect(itemsPane.style.width).toBe('');
         expect(itemsPane.getAttribute('width')).toBe('924');
 
@@ -500,7 +516,7 @@ describe('one sidebar for library and reader tabs', () => {
         await settle();
         splitter.dispatchEvent(new win.MouseEvent('mouseup', { bubbles: true }));
         await settle();
-        expect(itemPane.style.width).toBe('700px');
+        expect(itemPane.style.flexBasis).toBe('700px');
         expect(itemsPane.style.width).toBe('');
 
         uiManager.updateUI({ isVisible: false, isLibraryTab: true });
@@ -515,7 +531,7 @@ describe('one sidebar for library and reader tabs', () => {
         const { win, uiManager, itemPane, done } = await setup();
         uiManager.updateUI({ isVisible: true, isLibraryTab: true });
         await drag(win, itemPane, 337);
-        expect(itemPane.style.width).toBe('337px');
+        expect(itemPane.style.flexBasis).toBe('337px');
         expect(itemPane.getAttribute('width')).toBe('337');
         uiManager.updateUI({ isVisible: false, isLibraryTab: true });
         expect(itemPane.style.width).toBe('337px');
@@ -531,7 +547,7 @@ describe('one sidebar for library and reader tabs', () => {
         itemPane.style.width = '350px';
         itemPane.setAttribute('width', '350');
         await settle();
-        expect(itemPane.style.width).toBe('480px');
+        expect(itemPane.style.flexBasis).toBe('480px');
         expect(itemPane.getAttribute('width')).toBe('350');
         await new Promise(resolve => setTimeout(resolve, 300));
         expect(setPref).not.toHaveBeenCalledWith('sidebarWidth', 350);
@@ -565,13 +581,15 @@ describe('one sidebar for library and reader tabs', () => {
         contextPane.style.width = '600px';
         expect(contextPane.style.flexBasis).toBe('420px');
         await settle();
-        expect(contextPane.style.width).toBe('420px');
+        expect(contextPane.style.flexBasis).toBe('420px');
+        // Zotero's width is replaced, or a splitter drag would start from it.
+        expect(contextPane.style.width).toBe('-moz-available');
 
         // A width Zotero itself sets on the attribute is its own.
         contextPane.setAttribute('width', '650');
         await settle();
         expect(contextPane.getAttribute('width')).toBe('650');
-        expect(contextPane.style.width).toBe('420px');
+        expect(contextPane.style.flexBasis).toBe('420px');
 
         uiManager.updateUI({ isVisible: false, isLibraryTab: false });
         expect(contextPane.style.width).toBe('600px');
@@ -584,9 +602,24 @@ describe('one sidebar for library and reader tabs', () => {
         const { setPref } = await import('../../../src/utils/prefs');
         itemPane.getBoundingClientRect = () => ({ width: 357 }) as DOMRect;
         uiManager.updateUI({ isVisible: true, isLibraryTab: true });
-        expect(itemPane.style.width).toBe('357px');
+        expect(itemPane.style.flexBasis).toBe('357px');
         await new Promise(resolve => setTimeout(resolve, 300));
         expect(setPref).toHaveBeenCalledWith('sidebarWidth', 357);
+        done();
+    });
+
+    it('keeps the width Zotero gives the context pane when the layout becomes stacked', async () => {
+        prefs.values.sidebarWidth = 420;
+        const { uiManager, contextPane, done } = await setup();
+        uiManager.updateUI({ isVisible: true, isLibraryTab: false });
+        vi.mocked(Zotero.Prefs.get).mockImplementation((pref: string) => (pref === 'layout' ? 'stacked' : undefined));
+        // Zotero's stacked layout spans the context pane across the window.
+        contextPane.style.width = 'auto';
+        await settle();
+        uiManager.updateUI({ isVisible: true, isLibraryTab: false });
+        expect(contextPane.style.width).toBe('auto');
+        expect(contextPane.style.flexBasis).toBe('');
+        vi.mocked(Zotero.Prefs.get).mockReturnValue(undefined);
         done();
     });
 

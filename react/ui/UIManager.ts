@@ -11,13 +11,32 @@ import { preferencesRevisionAtom } from '../atoms/preferences';
 const WIDTH_SAVE_DELAY_MS = 250;
 
 /**
- * The occupied pane's flex-shrink. When the window is too narrow for the pane
- * and its neighbour together, the browser shrinks both in proportion to their
- * base size, so a wide neighbour would squeeze the sidebar below its width.
- * Near zero, the neighbour gives way first, down to its minimum, and the
- * sidebar only narrows once nothing else can.
+ * The flex-shrink of the occupied pane and of its splitter neighbour. When the
+ * window is too narrow for both, the browser shrinks them in proportion to
+ * flex-shrink times base size, so a wide neighbour would squeeze the sidebar
+ * below its width. With these values the neighbour gives way first, down to
+ * its minimum, and the sidebar narrows once nothing else can.
+ *
+ * The pane's value must not be below 1: once the neighbour is at its minimum,
+ * a flex row only takes from the remaining items the overflow times the sum
+ * of their flex-shrink, so a smaller value would leave the sidebar overflowing
+ * the window.
  */
-const PANE_FLEX_SHRINK = '0.001';
+const PANE_FLEX_SHRINK = '1';
+const NEIGHBOUR_FLEX_SHRINK = '1000';
+
+/**
+ * The occupied pane's inline width. The pane is sized by its flex-basis; the
+ * inline width replaces Zotero's own, which a splitter drag would otherwise
+ * start from (a non-length width makes it start from the width shown). A
+ * length here would also count toward the minimum width of the item pane's
+ * row, which then overflows the window instead of shrinking the sidebar.
+ *
+ * The value also tells the sidebar's width from one Zotero wrote, so it must
+ * be one Zotero never sets inline: Zotero writes pixel widths, and `auto` on
+ * the context pane in the stacked layout.
+ */
+const PANE_STYLE_WIDTH = '-moz-available';
 
 /** The Zotero pane the sidebar occupies while it is shown. */
 interface Host {
@@ -39,9 +58,9 @@ interface Host {
     nativeFlexBasis: string;
     /**
      * The element on the other side of the pane's splitter, with its inline
-     * width and `width` attribute from before the sidebar sized the pane.
+     * width, flex-shrink and `width` attribute from before the sidebar sized the pane.
      */
-    neighbour: { element: HTMLElement; styleWidth: string; widthAttr: string | null } | null;
+    neighbour: { element: HTMLElement; styleWidth: string; flexShrink: string; widthAttr: string | null } | null;
     /** The user dragged the pane's splitter while the sidebar was in the pane. */
     dragged: boolean;
     widthObserver: MutationObserver | null;
@@ -463,7 +482,10 @@ class UIManager {
                 ? splitter.previousElementSibling as HTMLElement | null
                 : null;
             host.neighbour = neighbour
-                ? { element: neighbour, styleWidth: neighbour.style.width, widthAttr: widthAttribute(neighbour) }
+                ? {
+                    element: neighbour, styleWidth: neighbour.style.width,
+                    flexShrink: neighbour.style.flexShrink, widthAttr: widthAttribute(neighbour),
+                }
                 : null;
             host.dragged = false;
         }
@@ -483,8 +505,8 @@ class UIManager {
      * the sidebar width. The attribute is then put back, because Zotero
      * persists it as its own width for the pane. A width written outside a
      * drag is Zotero sizing its own pane, and is kept as the pane's width for
-     * when the sidebar leaves it. Any inline width other than the sidebar's is
-     * then replaced by the sidebar width.
+     * when the sidebar leaves it. Any other inline width is then replaced by
+     * PANE_STYLE_WIDTH.
      *
      * The pane is sized by its flex-basis, which in its flex row takes the
      * place of `width`. Zotero writes the pane's inline width on each window
@@ -523,7 +545,7 @@ class UIManager {
             // Zotero sizing its own pane: restoring the width it saved, or
             // raising it to its minimum. That is the pane's width from now on.
             host.nativeWidthAttr = attr;
-            if (pane.style.width !== `${this.width}px`) host.nativeStyleWidth = pane.style.width;
+            if (pane.style.width !== PANE_STYLE_WIDTH) host.nativeStyleWidth = pane.style.width;
         }
         // A drag writes the other side of the splitter too.
         this.sizePane(host);
@@ -532,17 +554,19 @@ class UIManager {
     /**
      * Size the occupied pane by the sidebar width and let its neighbour take the rest.
      *
-     * The flex-basis is what sizes the pane. The inline width must still be the
-     * sidebar width: a splitter drag starts from the pane's inline width, not
-     * from the width it is shown at, so Zotero's width there would make a drag
-     * jump by the difference.
+     * The flex-basis is what sizes the pane. A splitter drag starts from the
+     * pane's computed width when that is a length, not from the width it is
+     * shown at, so Zotero's width there would make a drag jump by the
+     * difference; see PANE_STYLE_WIDTH.
      */
     private sizePane(host: Host): void {
         const style = host.pane.style;
         const css = `${this.width}px`;
-        if (this.width && style.width !== css) style.width = css;
+        if (this.width && style.width !== PANE_STYLE_WIDTH) style.width = PANE_STYLE_WIDTH;
         if (this.width && style.flexBasis !== css) style.flexBasis = css;
         if (style.flexShrink !== PANE_FLEX_SHRINK) style.flexShrink = PANE_FLEX_SHRINK;
+        const neighbour = host.neighbour?.element.style;
+        if (neighbour && neighbour.flexShrink !== NEIGHBOUR_FLEX_SHRINK) neighbour.flexShrink = NEIGHBOUR_FLEX_SHRINK;
         clearNeighbourWidth(host);
     }
 
@@ -557,7 +581,7 @@ class UIManager {
             host.widthObserver = null;
         }
         if (host.nativeStyleWidth === null) return;
-        if (host.pane.style.width === `${this.width}px`) {
+        if (host.pane.style.width === PANE_STYLE_WIDTH) {
             if (host.nativeStyleWidth) host.pane.style.width = host.nativeStyleWidth;
             else host.pane.style.removeProperty('width');
         }
@@ -574,6 +598,10 @@ class UIManager {
         if (neighbour) {
             if (neighbour.styleWidth) neighbour.element.style.width = neighbour.styleWidth;
             else neighbour.element.style.removeProperty('width');
+            if (neighbour.element.style.flexShrink === NEIGHBOUR_FLEX_SHRINK) {
+                if (neighbour.flexShrink) neighbour.element.style.flexShrink = neighbour.flexShrink;
+                else neighbour.element.style.removeProperty('flex-shrink');
+            }
             if (host.dragged) {
                 if (neighbour.widthAttr === null) neighbour.element.removeAttribute('width');
                 else neighbour.element.setAttribute('width', neighbour.widthAttr);
