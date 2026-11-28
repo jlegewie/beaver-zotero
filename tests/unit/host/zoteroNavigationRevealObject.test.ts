@@ -132,3 +132,11 @@ describe('zoteroNavigation.revealObject', () => {
         expect(notifyReferenceUnavailable).toHaveBeenCalledWith('link');
     });
 });
+
+describe('zoteroNavigation.openExternalUrl', () => {
+    it('hands the URL to the OS when no main window is left to route it through', () => {
+        Zotero.launchURL = vi.fn();
+        zoteroNavigation.openExternalUrl('mailto:contact@beaverapp.ai');
+        expect(Zotero.launchURL).toHaveBeenCalledWith('mailto:contact@beaverapp.ai');
+    });
+});

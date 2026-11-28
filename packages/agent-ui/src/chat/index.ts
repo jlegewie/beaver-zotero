@@ -17,6 +17,9 @@ export type { CitationDisplayState, CitationViewModel } from './useCitationViewM
 
 export { useCitationMarker } from './useCitationMarker';
 
+export { default as RenderErrorBoundary, RenderErrorNotice } from './RenderErrorBoundary';
+export type { RenderErrorBoundaryProps, RenderErrorNoticeProps } from './RenderErrorBoundary';
+
 export { hasAlternateModifier, useAlternateActivation } from './useAlternateActivation';
 export type { AlternateActivation } from './useAlternateActivation';
 

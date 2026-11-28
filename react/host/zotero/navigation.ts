@@ -129,9 +129,10 @@ export const zoteroNavigation: NavigationHost = {
         // their registered protocol extension in-process (including Beaver's
         // own thread links) and hands everything else to the OS browser.
         // Never navigate the window itself — the UI lives in a chrome document.
+        // The separate window can outlive every main window; it then has no
+        // pane to route through, and the OS handler still opens the URL.
         const win = tryGetWindowRuntime()?.contextWindow;
-        if (!win || win.closed) return;
-        const pane = win.ZoteroPane;
+        const pane = win && !win.closed ? win.ZoteroPane : null;
         if (pane) {
             pane.loadURI(url);
             return;

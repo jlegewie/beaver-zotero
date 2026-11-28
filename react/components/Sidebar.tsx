@@ -45,6 +45,8 @@ import { FindQueryProvider } from '@beaver/agent-ui/chat/findContext';
 import { FindInChatControlsProvider, useFindInChat } from '../hooks/useFindInChat';
 import FindBar from './ui/FindBar';
 import { chatLineSpacingAtom, CHAT_LINE_SPACING } from '../atoms/preferences';
+import RenderErrorBoundary from '@beaver/agent-ui/chat/RenderErrorBoundary';
+import { currentThreadIdAtom } from '../atoms/threads';
 
 interface SidebarProps {
     location: 'library' | 'reader';
@@ -208,6 +210,7 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
     const chatAccessGate = useAtomValue(chatAccessGateAtom);
     const isMigratingData = useAtomValue(isMigratingDataAtom);
     const isThreadListView = useAtomValue(isThreadListViewAtom);
+    const currentThreadId = useAtomValue(currentThreadIdAtom);
     const setIsThreadListView = useSetAtom(isThreadListViewAtom);
 
     const allWarnings = useAtomValue(threadWarningsAtom);
@@ -425,7 +428,23 @@ const Sidebar = ({ location, isWindow = false, header: headerOverride }: Sidebar
                         it does without find-in-chat. */}
                     {isThreadView ? (
                         <FindQueryProvider query={find.activeQuery}>
-                            <ThreadView ref={setMessagesContainerRef} />
+                            {/* Messages have their own boundaries; this one catches the
+                                thread view itself, keeping the header and composer. */}
+                            <RenderErrorBoundary
+                                scope="thread"
+                                summary="This chat couldn't be shown."
+                                detail="Start a new chat, or open another one from your chat history."
+                                threadId={currentThreadId}
+                                resetKey={currentThreadId}
+                                layout="page"
+                                wrapFallback={(notice) => (
+                                    <div className="flex-1 min-h-0 overflow-y-auto scrollbar display-flex flex-col justify-center">
+                                        {notice}
+                                    </div>
+                                )}
+                            >
+                                <ThreadView ref={setMessagesContainerRef} />
+                            </RenderErrorBoundary>
                         </FindQueryProvider>
                     ) : (
                         <HomePage isWindow={isWindow} inputRef={inputRef} />

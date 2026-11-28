@@ -11,6 +11,9 @@ export type { ButtonVariant } from './Button';
 
 export { default as IconButton } from './IconButton';
 
+export { default as ErrorBoundary } from './ErrorBoundary';
+export type { ErrorBoundaryProps, ErrorBoundaryFallbackProps } from './ErrorBoundary';
+
 export { default as Tooltip } from './Tooltip';
 export type { TooltipProps } from './Tooltip';
 

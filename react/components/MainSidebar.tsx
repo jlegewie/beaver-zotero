@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAtomValue } from "jotai";
 import Sidebar from "./Sidebar";
+import SidebarErrorBoundary from "./SidebarErrorBoundary";
 import { isSidebarVisibleAtom, isLibraryTabAtom } from "../atoms/ui";
 import { useObservePaneCollapse } from '../hooks/useObservePaneCollapse';
 
@@ -22,7 +23,11 @@ const MainSidebarContent = () => {
 
 const MainSidebar = () => {
     const isVisible = useAtomValue(isSidebarVisibleAtom);
-    return isVisible ? <MainSidebarContent /> : null;
+    return isVisible ? (
+        <SidebarErrorBoundary>
+            <MainSidebarContent />
+        </SidebarErrorBoundary>
+    ) : null;
 };
 
 export default MainSidebar;

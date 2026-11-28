@@ -46,6 +46,8 @@ import { currentNoteItemAtom } from './atoms/zoteroContext';
 import FloatingPopupRoot from './components/FloatingPopupRoot';
 import PreferencesWindow from './components/PreferencesWindow';
 import WindowSidebar from './components/WindowSidebar';
+import SidebarErrorBoundary from './components/SidebarErrorBoundary';
+import RenderErrorBoundary from '@beaver/agent-ui/chat/RenderErrorBoundary';
 import TableTabView, { type TableViewCommands } from './components/tables/TableTabView';
 import type { TableRef } from '../src/services/artifacts/tableItemIdentity';
 import type { TableFocusTarget, TableTabHandle, TableTabMountOptions, TableTabRequest } from '../src/ui/tableTabTypes';
@@ -260,7 +262,11 @@ export { renderSidebar };
  * Uses this renderer’s own store and chat connection.
  */
 export function renderWindowSidebar(domElement: HTMLElement) {
-    return mountSurface(domElement, <WindowSidebar />);
+    return mountSurface(domElement, (
+        <SidebarErrorBoundary>
+            <WindowSidebar />
+        </SidebarErrorBoundary>
+    ));
 }
 
 /**
@@ -308,7 +314,22 @@ export function renderTableTab(
     // A table window's renderer has no chat: it follows fill jobs here, so its
     // balance leaves out what fills in other windows hold.
     watchChatFills();
-    mountSurface(domElement, <TableTabView tableRef={tableRef} options={options} warnings={warnings} commandsRef={commands} />);
+    // A table that fails to render shows a notice instead of an empty tab.
+    // Its surface has no report form, so the notice offers the support email.
+    mountSurface(domElement, (
+        <RenderErrorBoundary
+            scope="table"
+            summary="This table couldn't be shown."
+            detail="Your table is saved. Close it and open it again."
+            reportable={false}
+            layout="page"
+            wrapFallback={(notice) => (
+                <div className="h-full w-full display-flex flex-col justify-center overflow-y-auto">{notice}</div>
+            )}
+        >
+            <TableTabView tableRef={tableRef} options={options} warnings={warnings} commandsRef={commands} />
+        </RenderErrorBoundary>
+    ));
     return {
         setWarning(next) {
             if (next === warning) return;
