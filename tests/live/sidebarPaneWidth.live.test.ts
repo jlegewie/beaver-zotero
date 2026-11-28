@@ -12,7 +12,12 @@
  *
  * Prerequisites (per tests/README.md):
  *   - Dev build of Beaver loaded in a running Zotero, logged in.
- *   - One main window, in the standard (three-pane) layout.
+ *   - One main window, in the standard (three-pane) layout, wide enough that the
+ *     sidebar is shown at its full width. A sidebar shrunk to its pane's minimum
+ *     makes the endpoint try a wider Zotero width, and on a library tab a wider
+ *     inline width counts toward that row's minimum until the sidebar's width
+ *     observer replaces it later in the same task, so the measurement differs
+ *     even though nothing is drawn at that width.
  *   - The `SMALL_PDF` fixture present and not excluded.
  *
  * Side effects: opens the `SMALL_PDF` reader tab, selects the library tab, and
