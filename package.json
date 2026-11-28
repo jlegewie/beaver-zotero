@@ -52,8 +52,8 @@
         "test:cli-smoke": "vitest run --config vitest.smoke.config.ts"
     },
     "dependencies": {
-        "@lexical/react": "^0.43.0",
-        "@lexical/utils": "^0.43.0",
+        "@lexical/react": "^0.53.0",
+        "@lexical/utils": "^0.53.0",
         "@supabase/supabase-js": "^2.119.0",
         "date-fns": "^4.4.0",
         "diff": "^8.0.4",
@@ -63,7 +63,7 @@
         "jotai": "^2.12.1",
         "jszip": "^3.10.2",
         "katex": "^0.16.47",
-        "lexical": "^0.43.0",
+        "lexical": "^0.53.0",
         "pako": "^1.0.11",
         "prosemirror-model": "^1.25.13",
         "prosemirror-state": "^1.4.4",
