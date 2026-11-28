@@ -2,8 +2,14 @@ import React from 'react';
 import { atom, useAtomValue } from 'jotai';
 import type { TableCardCost } from '@beaver/agent-core/protocol/tableCardProtocol';
 import { balanceAfterCommitted, type TableFillPricing } from '@beaver/agent-core/protocol/tableFillProtocol';
-import { balanceNotice, costBreakdown, costNotice, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
-import { creditsActionLabel } from '@beaver/agent-core/run-state/tableFillCopy';
+import { costBreakdown, costNotice, costReceipt } from '@beaver/agent-core/run-state/tableCardDraft';
+import {
+    balanceShortfall,
+    creditsActionLabel,
+    creditsText,
+    type AffordablePart,
+    type BalanceShortfall,
+} from '@beaver/agent-core/run-state/tableFillCopy';
 import { isImeKeyEvent } from '@beaver/agent-ui/primitives/ime';
 import { profileWithPlanAtom, remainingBeaverCreditsAtom } from '../../../atoms/profile';
 import { committedFillCreditsAtom } from '../../../atoms/tableChatFills';
@@ -87,53 +93,106 @@ export function useShortWindow(): boolean {
     return short;
 }
 
+/** Focus events a credits prompt already answered with a refresh. */
+const refreshedOnFocus = new WeakSet<Event>();
+
+/**
+ * While a way to credits is on screen, reads the balance again whenever the
+ * window comes back into focus: credits bought in the browser otherwise reach
+ * the profile only at its next periodic refresh. One focus refreshes once,
+ * however many prompts are mounted.
+ */
+export function useRefreshBalanceOnFocus(active: boolean): void {
+    const win = useSurfaceWindow();
+    React.useEffect(() => {
+        if (!active) return;
+        const refresh = (event: Event) => {
+            if (refreshedOnFocus.has(event)) return;
+            refreshedOnFocus.add(event);
+            void Zotero.Beaver.account?.refresh(true);
+        };
+        win.addEventListener('focus', refresh);
+        return () => win.removeEventListener('focus', refresh);
+    }, [active, win]);
+}
+
+/**
+ * A card's balance shortfall for its fill (`balanceShortfall`), live: credits
+ * bought meanwhile clear it. The card does not know the order of the plan's
+ * rows, so the part the balance pays for is the bound from the cost's counts:
+ * approving that many never runs out. `partial`: the card can fill only that
+ * part (its backend takes a limit). Null without a cost, or while the
+ * balance covers the fill or is unknown.
+ */
+export function useCardBalanceShortfall(
+    cost: TableCardCost | null,
+    prices: TableFillPricing | null,
+    partial = false,
+): BalanceShortfall | null {
+    const balance = useCreditBalance();
+    const accountBalance = useAccountCreditBalance();
+    const shortfall = cost
+        ? balanceShortfall(cost, prices, balance, { accountBalance: accountBalance ?? balance, partial })
+        : null;
+    useRefreshBalanceOnFocus(!!shortfall);
+    return shortfall;
+}
+
 export interface TableCardFillWarningsProps {
     cost: TableCardCost;
-    prices: TableFillPricing | null;
+    /** The balance's shortfall for the fill (`useCardBalanceShortfall`). */
+    shortfall: BalanceShortfall | null;
     /** Rendered at the end of the card's scrolling content rather than in its footer. */
     inBody?: boolean;
     /** A fill card's alert that the fill reads answered papers again (`refillNotice`). */
     refill?: string | null;
+    /** Whether the shortfall carries the way to credits; false when the card's controls do. */
+    creditsAction?: boolean;
 }
 
 /**
- * The bands for the facts about a fill that change what the user does: a
- * fill that reads answered papers again (a fill card's `refill`), a balance
- * that does not reach (with Add credits), and items without full text.
- * Renders nothing when none applies.
+ * The one band for the fact about a fill that most changes what the user
+ * does, or nothing: in red, a balance that does not cover the fill, with a
+ * way to credits; otherwise, quieter, a fill that reads answered papers again
+ * (a fill card's `refill`); otherwise items without full text (also in the
+ * pricing popover). What to do about a short balance is the card's controls'
+ * job, never a second action in the band.
  */
-export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({ cost, prices, inBody = false, refill = null }) => {
-    const balance = useCreditBalance();
+export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({
+    cost,
+    shortfall,
+    inBody = false,
+    refill = null,
+    creditsAction = true,
+}) => {
     const accountBalance = useAccountCreditBalance();
-    const balanceWarning = balanceNotice(cost, balance, prices, accountBalance ?? balance);
+    const balance = useCreditBalance();
     const readWarning = costNotice(cost);
-    if (!refill && !balanceWarning && !readWarning) return null;
-    const bands = (
-        <>
-            {refill && (
-                <div className="table-card-footer-band table-card-footer-band-warning" role="note">
-                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
-                    <span className="table-card-notice-text">{refill}</span>
-                </div>
-            )}
-            {balanceWarning && (
-                <div className="table-card-footer-band table-card-footer-band-warning" role="alert">
-                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
-                    <span className="table-card-notice-text">{balanceWarning}</span>
+    let band: React.ReactNode;
+    if (shortfall) {
+        band = (
+            // Only a balance that cannot fill anything interrupts; a short one is a status.
+            <div className="table-card-footer-band table-card-footer-band-error" role={shortfall.blocked ? 'alert' : 'status'}>
+                <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
+                <span className="table-card-notice-text">{shortfall.text}</span>
+                {creditsAction && (
                     <button type="button" className="table-card-warning-action" onClick={() => openPreferencesWindow('billing')}>
                         {creditsActionLabel(accountBalance ?? balance)}
                     </button>
-                </div>
-            )}
-            {readWarning && (
-                <div className="table-card-footer-band table-card-footer-band-warning" role="status">
-                    <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
-                    <span className="table-card-notice-text">{readWarning}</span>
-                </div>
-            )}
-        </>
-    );
-    return inBody ? <div className="table-card-body-bands">{bands}</div> : bands;
+                )}
+            </div>
+        );
+    } else if (refill || readWarning) {
+        band = (
+            <div className="table-card-footer-band table-card-footer-band-info" role="note">
+                <Icon icon={InformationCircleIcon} className="table-card-warning-icon" />
+                <span className="table-card-notice-text">{refill ?? readWarning}</span>
+            </div>
+        );
+    } else {
+        return null;
+    }
+    return inBody ? <div className="table-card-body-bands">{band}</div> : band;
 };
 
 export interface TableCardReceiptProps {
@@ -142,16 +201,21 @@ export interface TableCardReceiptProps {
     upperBound?: boolean;
     prices: TableFillPricing | null;
     disabled?: boolean;
+    /** The part of the fill the card starts, when the balance covers only that. */
+    part?: AffordablePart | null;
 }
 
 /**
  * The create card's receipt, beside its run checkbox: "12 papers · 2.1
  * credits", and an info button whose popover holds what is read once: how
  * many papers are read from full text, from their abstract or skipped, each
- * with its rate.
+ * with its rate. For the part a short balance covers: "8 of 23 items · up
+ * to 1.6 credits".
  */
-export const TableCardReceipt: React.FC<TableCardReceiptProps> = ({ cost, upperBound = false, prices, disabled = false }) => {
-    const { papers, credits } = costReceipt(cost, upperBound);
+export const TableCardReceipt: React.FC<TableCardReceiptProps> = ({ cost, upperBound = false, prices, disabled = false, part = null }) => {
+    const whole = costReceipt(cost, upperBound);
+    const papers = part ? `${part.items.toLocaleString('en-US')} of ${part.of.toLocaleString('en-US')} items` : whole.papers;
+    const credits = part ? `up to ${creditsText(part.credits)}` : whole.credits;
     const [open, setOpen] = React.useState(false);
     const [position, setPosition] = React.useState<{ bottom: number; right: number } | null>(null);
     const buttonRef = React.useRef<HTMLButtonElement | null>(null);

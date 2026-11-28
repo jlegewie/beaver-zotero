@@ -22,7 +22,8 @@ import {
     fillScopeLine,
     tableFillCardResponse,
     fillCardTrialRows,
-    balanceNotice,
+    createCardTrialRows,
+    CREATE_TRIAL_MIN_ROWS,
     columnProblem,
     costBreakdown,
     costNotice,
@@ -124,6 +125,26 @@ describe('table card draft', () => {
         const response = tableCardResponse(draft, request, 'create');
         expect(response).not.toHaveProperty('estimate_id');
         expect(response.choice).toBe(reply!.choice);
+    });
+
+    it('creates and fills only the trial, or only the first rows, when the backend offers them', () => {
+        const { request, reply } = fixture('create-trial');
+        const draft = initialTableCardDraft(request);
+        expect(createCardTrialRows(request, request.cost)).toBe(5);
+        expect(tableCardResponse(draft, request, 'create_and_run', request.cost, { trial: true })).toEqual(reply);
+        const limited = tableCardResponse(draft, request, 'create_and_run', request.cost, { limit: 12 });
+        expect(limited).toMatchObject({ choice: 'create_and_run', limit: 12 });
+        expect(limited).not.toHaveProperty('trial');
+        // Creating alone starts no fill, so it names no part of one.
+        expect(tableCardResponse(draft, request, 'create', request.cost, { limit: 12 })).not.toHaveProperty('limit');
+        // An older backend offers neither: the approval fills everything it approves.
+        const older = { ...request, trial_rows: null, accepts_limit: null };
+        expect(createCardTrialRows(older, request.cost)).toBeNull();
+        expect(tableCardResponse(draft, older, 'create_and_run', request.cost, { trial: true, limit: 12 })).not.toHaveProperty('trial');
+        expect(tableCardResponse(draft, older, 'create_and_run', request.cost, { limit: 12 })).not.toHaveProperty('limit');
+        // A fill too small for a trial to help.
+        expect(createCardTrialRows(request, { ...request.cost!, rows: CREATE_TRIAL_MIN_ROWS - 1 })).toBeNull();
+        expect(createCardTrialRows(request, null)).toBeNull();
     });
 
     it('offers the run as a ticked checkbox named for what runs once the card carries a cost', () => {
@@ -653,27 +674,6 @@ describe('table card draft', () => {
             ]);
         });
 
-        it('warns only when the balance does not reach the fill', () => {
-            const cost = { rows: 12, documents: 12, title_abstract: 0, no_input: 0, credits: 2.4 };
-            expect(balanceNotice(cost, 1.4, PRICES)).toBe('Your 1.4 credits cover about 7 of 12 items.');
-            expect(balanceNotice(cost, 5, PRICES)).toBeNull();
-            // Where the estimate would be "about 0", the warning says the balance is not enough.
-            expect(balanceNotice(cost, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these items.");
-            const mixed = { rows: 2, documents: 1, title_abstract: 1, no_input: 0, credits: 0.25 };
-            expect(balanceNotice(mixed, 0.1, PRICES)).toBe("Your 0.1 credits aren't enough to fill these items.");
-            expect(balanceNotice(mixed, 0.15, PRICES)).toBe('Your 0.15 credits cover about 1 of 2 items.');
-            expect(balanceNotice({ rows: 1, documents: 1, title_abstract: 0, no_input: 0, credits: 0.2 }, 0, PRICES)).toBe(
-                "Your 0 credits aren't enough to fill this item.",
-            );
-            expect(balanceNotice(cost, null, PRICES)).toBeNull();
-            // Running fills hold part of the account's balance: the warning says how much, at most.
-            expect(balanceNotice(cost, 1.4, PRICES, 6)).toBe(
-                'Fills already running may use up to 4.6 of your 6 credits; the rest covers about 7 of 12 items.',
-            );
-            expect(balanceNotice(cost, 0.1, PRICES, 3)).toBe(
-                "Fills already running may use up to 2.9 of your 3 credits; the rest isn't enough to fill these items.",
-            );
-        });
     });
 
     describe('the fill card', () => {
@@ -695,12 +695,20 @@ describe('table card draft', () => {
         it('approves only the trial the request offered with trial', () => {
             const { request, reply } = fillFixture('fill-trial');
             expect(fillCardTrialRows(request)).toBe(5);
-            expect(tableFillCardResponse(request, true)).toEqual(reply);
+            expect(tableFillCardResponse(request, { trial: true })).toEqual(reply);
             expect(tableFillCardResponse(request)).not.toHaveProperty('trial');
             // No trial on offer, or none smaller than the fill: the approval fills the plan.
             expect(fillCardTrialRows({ ...request, trial_rows: null })).toBeNull();
-            expect(tableFillCardResponse({ ...request, trial_rows: null }, true)).not.toHaveProperty('trial');
+            expect(tableFillCardResponse({ ...request, trial_rows: null }, { trial: true })).not.toHaveProperty('trial');
             expect(fillCardTrialRows({ ...request, cost: { ...request.cost, rows: 5 } })).toBeNull();
+        });
+
+        it('approves only the first rows with a limit, and only for a backend that takes one', () => {
+            const { request, reply } = fillFixture('fill-limit');
+            expect(request.accepts_limit).toBe(true);
+            expect(tableFillCardResponse(request, { limit: 7 })).toEqual(reply);
+            // An older backend would ignore the limit and fill everything.
+            expect(tableFillCardResponse({ ...request, accepts_limit: null }, { limit: 7 })).not.toHaveProperty('limit');
         });
 
         it('declines with the instructions typed', () => {

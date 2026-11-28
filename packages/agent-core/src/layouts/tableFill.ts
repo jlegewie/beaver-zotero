@@ -353,6 +353,17 @@ function isFillerAnswer(cell: Cell | undefined): boolean {
 }
 
 /**
+ * Whether a fill has read the row's paper: a question cell holds the filler's
+ * answer, or a user's correction of one (it keeps the answer it replaced).
+ */
+export function rowReadByFiller(fillable: readonly Column[], row: Row): boolean {
+    return fillable.some((column) => {
+        const cell = row.cells[column.id];
+        return isFillerAnswer(cell) || isFillerAnswer(cell?.replaced);
+    });
+}
+
+/**
  * The rows of a fill that read a paper again although it already holds the
  * filler's answers, for a question no row has a current answer to yet: a
  * column added to a filled table, or a changed question (its old answers
@@ -385,11 +396,7 @@ export function rereadRows(
             return (
                 !!row &&
                 planned.columns.some((id) => !answered.has(id)) &&
-                // A user's correction keeps the answer it replaced: that paper was read.
-                fillable.some((column) => {
-                    const cell = row.cells[column.id];
-                    return isFillerAnswer(cell) || isFillerAnswer(cell?.replaced);
-                })
+                rowReadByFiller(fillable, row)
             );
         })
         .map((planned) => planned.row);

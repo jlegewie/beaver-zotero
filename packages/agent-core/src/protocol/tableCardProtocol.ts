@@ -152,6 +152,18 @@ export interface WSTableCardRequest extends WSBaseEvent {
     columns: TableCardColumn[];
     /** Null while nothing can run on approval: the card offers Create table without a run checkbox. */
     cost: TableCardCost | null;
+    /**
+     * The trial the card offers beside the fill (fill cards; create cards
+     * that can run): approving it with `trial` fills only the plan's first
+     * this many rows. Absent when the backend offers none (older backends,
+     * small fills).
+     */
+    trial_rows?: number | null;
+    /**
+     * The card may approve only the plan's first rows: a reply with `limit`
+     * fills that many. Older backends do not send it, and ignore `limit`.
+     */
+    accepts_limit?: boolean | null;
     user_instructions_prefill?: string;
     timeout_seconds: number;
 }
@@ -176,12 +188,6 @@ export interface WSTableFillCardRequest extends WSTableCardRequest {
      * added to a filled table. Absent from older backends.
      */
     rereads?: number | null;
-    /**
-     * The trial the card offers beside the fill: approving it with `trial`
-     * fills only the plan's first this many rows. Absent when the backend
-     * offers none (older backends, small fills).
-     */
-    trial_rows?: number | null;
 }
 
 export function isCreateCard(request: WSTableCardRequest): request is WSTableCreateCardRequest {
@@ -205,8 +211,13 @@ export interface WSTableCardResponse {
     card_id: string;
     approved: boolean;
     choice?: TableCardChoice | null;
-    /** `fill`: fill only the first `trial_rows` rows the request offered. */
+    /** `fill`, `create_and_run`: fill only the first `trial_rows` rows the request offered. */
     trial?: boolean | null;
+    /**
+     * `fill`, `create_and_run`: fill only the plan's first this many rows (the
+     * rows the balance pays for). Sent only when the request `accepts_limit`.
+     */
+    limit?: number | null;
     /** `create_and_run`: the cost the card showed, the ceiling of the fill it starts. */
     cost?: TableCardCost | null;
     title?: string | null;

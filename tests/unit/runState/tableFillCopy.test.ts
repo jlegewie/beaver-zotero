@@ -1,8 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { PendingWork } from "@beaver/agent-core/layouts/tableFill";
 import type { TableFillJobSnapshot, TableFillPlanSummary, TableFillResult } from "@beaver/agent-core/protocol/tableFillProtocol";
 import {
-    balanceLine,
+    affordableRowsBound,
+    balanceShortfall,
+    columnFillCostText,
+    fillPartLabel,
+    trialWithinBalance,
     creditsActionLabel,
     creditsText,
     failedRowsLink,
@@ -158,18 +162,140 @@ describe("table fill copy", () => {
         // Unreadable rows are skipped, not filled.
         expect(planTitle(plan({ rows: 4, documents: 2, title_abstract: 1, unavailable: 1 }))).toBe("Fill 3 items");
         expect(pendingLines(plan({ scope: { kind: "retry_failed" }, rows: 2 }))).toEqual([{ value: "Retry 2 items that failed last time" }]);
-        expect(balanceLine(plan({ credits: 9.2, balance: 6, documents: 46, title_abstract: 0 }))).toBe("Your 6 credits cover about 30 of 46 items");
-        expect(balanceLine(plan())).toBeNull();
         expect(planTitle(plan({ rows: 5, documents: 5, title_abstract: 0 }))).toBe("Fill 5 items");
-        expect(balanceLine(plan({ credits: 9.2, balance: 1, documents: 46, title_abstract: 0 }))).toBe("Your 1 credit covers about 5 of 46 items");
-        expect(balanceLine(plan({ balance: null }))).toBeNull();
-        // Running fills hold part of the account's balance: the line says so before the reach.
-        expect(balanceLine(plan({ credits: 0.45, balance: 0.3, documents: 2, title_abstract: 1 }), 5)).toBe(
-            "Fills already running may use up to 4.7 of your 5 credits; the rest covers about 2 of 3 items",
+    });
+
+    it("bounds the rows a balance surely pays for by the dearest price the fill pays", () => {
+        const fill = { rows: 46, documents: 46, title_abstract: 0, credits: 9.2 };
+        const prices = { document: 0.2, title_abstract: 0.05 };
+        expect(affordableRowsBound(fill, prices, 6)).toBe(30);
+        expect(affordableRowsBound(fill, prices, 9.2)).toBeNull();
+        expect(affordableRowsBound(fill, prices, null)).toBeNull();
+        expect(affordableRowsBound(fill, prices, 0.1)).toBe(0);
+        // Mixed: every row priced as a document, so the bound never runs out.
+        const mixed = { rows: 10, documents: 5, title_abstract: 5, credits: 1.25 };
+        expect(affordableRowsBound(mixed, prices, 1)).toBe(5);
+        // Abstracts only: their own price.
+        expect(affordableRowsBound({ rows: 10, documents: 0, title_abstract: 10, credits: 0.5 }, prices, 0.3)).toBe(6);
+        // Without the prices, the credits spread over the documents stand in: never below a row's price.
+        expect(affordableRowsBound(fill, null, 6)).toBe(30);
+        expect(affordableRowsBound(mixed, null, 1)).toBe(4);
+    });
+
+    it("warns of a balance short of the fill, naming the part it covers where the surface can fill only that", () => {
+        const fill = { rows: 46, documents: 46, title_abstract: 0, credits: 9.2 };
+        const prices = { document: 0.2, title_abstract: 0.05 };
+        expect(balanceShortfall(fill, prices, 6, { partial: true })).toEqual({
+            text: "Your 6 credits cover the first 30 of 46 items. The rest can be filled once you add credits.",
+            blocked: false,
+            affordable: 30,
+            part: { rows: 30, items: 30, of: 46, credits: 6 },
+        });
+        expect(balanceShortfall(fill, prices, 1, { partial: true })!.text).toBe(
+            "Your 1 credit covers the first 5 of 46 items. The rest can be filled once you add credits.",
         );
-        expect(balanceLine(plan({ credits: 0.45, balance: 0.3, documents: 2, title_abstract: 1 }), 0.3)).toBe(
-            "Your 0.3 credits cover about 2 of 3 items",
+        // A surface that can only fill everything: the fill stops partway.
+        expect(balanceShortfall(fill, prices, 6)).toEqual({
+            text: "This fill needs 9.2 credits and you have 6. It stops when your credits run out.",
+            blocked: false,
+            affordable: 30,
+            part: null,
+        });
+        expect(balanceShortfall(fill, prices, 9.2)).toBeNull();
+        expect(balanceShortfall(fill, prices, null)).toBeNull();
+        // Without the plan, the first rows the limit sends, unreadable items included.
+        expect(balanceShortfall({ ...fill, rows: 47 }, prices, 6, { partial: true })!.part).toEqual({
+            rows: 30,
+            items: 30,
+            of: 47,
+            credits: 6,
+        });
+        // However many items cannot be read, the part the balance pays for is offered.
+        expect(balanceShortfall({ rows: 3, documents: 2, title_abstract: 0, credits: 0.4 }, prices, 0.2, { partial: true })!.part).toEqual({
+            rows: 1,
+            items: 1,
+            of: 3,
+            credits: 0.2,
+        });
+        // A plan's exact part wins over the bound, asked for only once the balance falls short.
+        const exactPart = vi.fn(() => ({ rows: 32, items: 31, credits: 5.95 }));
+        expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart })).toEqual({
+            text: "Your 6 credits cover 31 of 46 items. The rest can be filled once you add credits.",
+            blocked: false,
+            affordable: 32,
+            part: { rows: 32, items: 31, of: 46, credits: 5.95 },
+        });
+        // The plan's rows reach no item it reads (its first item is dearer, or
+        // only unreadable rows): nothing would be answered, so it is blocked.
+        for (const reach of [{ rows: 0, items: 0, credits: 0 }, { rows: 2, items: 0, credits: 0 }])
+            expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart: () => reach })).toEqual({
+                text: "Your 6 credits don't cover the first item this fill reads.",
+                blocked: true,
+                affordable: null,
+                part: null,
+            });
+        balanceShortfall(fill, prices, 10, { exactPart: () => { throw new Error("not asked"); } });
+        expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart: () => null })!.part!.rows).toBe(30);
+        // Not one item: blocked, with the no-credits text.
+        expect(balanceShortfall(fill, prices, 0.1, { partial: true })).toEqual({
+            text: "Filling uses Beaver credits: 0.2 per item. You have 0.1 credits.",
+            blocked: true,
+            affordable: null,
+            part: null,
+        });
+        // Enough for a cheap row but not the first at the dearer price: no part to offer.
+        const mixed = { rows: 2, documents: 1, title_abstract: 1, credits: 0.25 };
+        expect(balanceShortfall(mixed, prices, 0.1, { partial: true })).toEqual({
+            text: "This fill needs 0.25 credits and you have 0.1. It stops when your credits run out.",
+            blocked: false,
+            affordable: 0,
+            part: null,
+        });
+        // Prices still loading: a mixed fill may still pay for an abstract, so it is not blocked.
+        expect(balanceShortfall(mixed, null, 0.1)!.blocked).toBe(false);
+        // A single kind is priced exactly by its credits: blocked as with the prices.
+        expect(balanceShortfall(fill, null, 0.1)!.blocked).toBe(true);
+        // Running fills hold part of the account's balance: the warning says how much, at most.
+        expect(
+            balanceShortfall({ rows: 3, documents: 2, title_abstract: 1, credits: 0.45 }, prices, 0.3, {
+                accountBalance: 5,
+                partial: true,
+            })!.text,
+        ).toBe(
+            "Fills already running may use up to 4.7 of your 5 credits. What's left covers the first 1 of 3 items. Wait for them to finish or add credits.",
         );
+        expect(fillPartLabel({ rows: 1300, items: 1234, of: 2000, credits: 1 })).toBe("Fill 1,234 of 2,000");
+    });
+
+    it("offers a trial only where the balance can finish it", () => {
+        const short = (affordable: number | null, blocked = false, part = true) => ({
+            text: "",
+            blocked,
+            affordable,
+            part: part && affordable ? { rows: affordable, items: affordable, of: 46, credits: 1 } : null,
+        });
+        expect(trialWithinBalance(5, null)).toBe(5);
+        expect(trialWithinBalance(5, short(6))).toBe(5);
+        expect(trialWithinBalance(5, short(5))).toBeNull();
+        expect(trialWithinBalance(5, short(null))).toBe(5);
+        expect(trialWithinBalance(5, short(null, true))).toBeNull();
+        expect(trialWithinBalance(null, null)).toBeNull();
+        // Exactly the trial, with no partial fill offered instead: the trial stays.
+        expect(trialWithinBalance(5, short(5, false, false))).toBe(5);
+        // Not even the first row: no trial.
+        expect(trialWithinBalance(5, short(0, false, false))).toBeNull();
+    });
+
+    it("prices a column the editor adds or asks anew at most at the document price", () => {
+        const prices = { document: 0.35, title_abstract: 0.1 };
+        expect(columnFillCostText(200, prices, true)).toBe(
+            "Filling this column reads up to 200 items again, at most 70 credits. Add your other columns first; one fill answers them all.",
+        );
+        expect(columnFillCostText(1, prices, false)).toBe(
+            "Filling this column reads up to 1 item, at most 0.35 credits. Add your other columns first; one fill answers them all.",
+        );
+        expect(columnFillCostText(0, prices, true)).toBeNull();
+        expect(columnFillCostText(10, null, true)).toBeNull();
     });
 
     it("says why a plan cannot start only when the balance cannot pay for one item", () => {

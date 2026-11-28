@@ -371,31 +371,54 @@
     color: var(--fill-secondary);
 }
 
-/* The balance falls short of the fill: the only time it is shown. The same
-   band says that a changed column reads every paper again. */
-.beaver-root .bt-fill-reach,
-.beaver-root .bt-fill-refill {
-    padding: 0.4rem 0.55rem;
-    border-radius: 0.4rem;
-    background: var(--tag-orange-quinary, var(--fill-quinary));
-    color: var(--tag-orange-primary, var(--fill-primary));
-    font-size: 0.86rem;
-}
-
-/* A short balance's line, with the way to credits at its end. */
-.beaver-root .bt-fill-reach-action {
+/* At most one callout above the actions, as on the chat cards: red when the
+   balance does not cover the fill (with the way to credits), grey when a
+   changed column reads every paper again. Tint and icon carry the kind; the
+   text keeps a legible color. */
+.beaver-root .bt-fill-callout {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-    gap: 0.6rem;
+    align-items: flex-start;
+    gap: 0.4rem;
+    padding: 0.45rem 0.55rem;
+    border-radius: 0.4rem;
+    font-size: 0.86rem;
+    line-height: 1.4;
 }
 
-.beaver-root .bt-fill-reach-link {
+.beaver-root .bt-fill-callout-icon {
+    flex: none;
+    width: 14px;
+    height: 14px;
+    margin-top: 2px;
+}
+
+.beaver-root .bt-fill-callout-error {
+    background: var(--tag-red-quinary, var(--fill-quinary));
+    color: var(--fill-primary);
+}
+
+.beaver-root .bt-fill-callout-error .bt-fill-callout-icon {
+    color: var(--tag-red-primary, var(--fill-primary));
+}
+
+.beaver-root .bt-fill-callout-info {
+    background: var(--fill-quinary);
+    color: var(--fill-secondary);
+}
+
+.beaver-root .bt-fill-callout-link {
     flex: 0 0 auto;
     padding: 0;
     font: inherit;
-    font-weight: 500;
+    font-weight: 600;
     white-space: nowrap;
+}
+
+/* In the red line, the links take its color rather than the link color. */
+.beaver-root .bt-fill-callout .bt-fill-callout-link {
+    color: inherit;
+    text-decoration: underline;
+    text-underline-offset: 2px;
 }
 
 .beaver-root .bt-fill-status {

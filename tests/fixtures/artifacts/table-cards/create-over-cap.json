@@ -86,6 +86,7 @@
     },
     "rereads": null,
     "trial_rows": null,
+    "accepts_limit": null,
     "user_instructions_prefill": "",
     "timeout_seconds": 600.0
   },

@@ -79,7 +79,7 @@ const plan: TableFillPlanSummary = {
     prices: { document: 0.2, title_abstract: 0.05 },
     pending: { rows: 2, cells: 2, new_rows: 2, columns: [], retry_rows: 0, blocked_rows: 0 },
     rereads: 0,
-    balance: 0.2,
+    balance: 10,
     expires_at: Date.now() + 60_000,
 };
 
@@ -110,6 +110,12 @@ const fills = {
     stop: vi.fn(() => true),
     dismiss: vi.fn(),
     jobForTable: vi.fn(() => null),
+    // Every planned row is read from its PDF, at 0.2.
+    affordablePart: vi.fn((_planId: string, balance: number | null) => {
+        if (balance == null) return null;
+        const rows = Math.floor(balance / 0.2 + 1e-9);
+        return { rows, items: rows, credits: Math.round(rows * 0.2 * 100) / 100 };
+    }),
 };
 
 beforeEach(() => {
@@ -163,7 +169,8 @@ describe('TableFillButton', () => {
         expect(buttonNamed('Fill 1 row')).toBeUndefined();
     });
 
-    it('shows the plan with its cost, warns of a short balance, and starts exactly that plan', async () => {
+    it('shows the plan with its cost, and when the balance is short, Fill fills the part it pays for', async () => {
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, balance: 0.2 } });
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
         await act(async () => buttonNamed('Fill 2 rows')!.click());
         expect(fills.plan).toHaveBeenCalledWith(ref, { kind: 'pending' });
@@ -175,12 +182,52 @@ describe('TableFillButton', () => {
         expect(popover.textContent).toContain('2 from PDF');
         // Never filled: no change lines, the heading says what is filled.
         expect(popover.querySelector('.bt-fill-changes')).toBeNull();
-        expect(popover.textContent).toContain('Your 0.2 credits cover about 1 of 2 items');
+        // One red callout, in the heading's unit, with the way to credits.
+        const callouts = popover.querySelectorAll('.bt-fill-callout');
+        expect(callouts).toHaveLength(1);
+        expect(callouts[0].className).toContain('bt-fill-callout-error');
+        expect(callouts[0].textContent).toContain('Your 0.2 credits cover 1 of 2 items. The rest can be filled once you add credits.');
+        // A short balance is a status; one that cannot fill anything is an alert.
+        expect(callouts[0].getAttribute('role')).toBe('status');
+        expect(fills.affordablePart).toHaveBeenCalledWith('plan-1', 0.2);
+        expect(buttonNamed('Try 5 first')).toBeUndefined();
+        expect(buttonNamed('Fill 2')).toBeUndefined();
         act(() => buttonNamed('Add credits')!.click());
         expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');
-        await act(async () => buttonNamed('Fill 2')!.click());
-        expect(fills.start).toHaveBeenCalledWith('plan-1');
+        await act(async () => buttonNamed('Fill 1 of 2')!.click());
+        expect(fills.trial).toHaveBeenCalledWith('plan-1', 1);
+        expect(fills.start).toHaveBeenCalledWith('trial-1');
         expect(container.querySelector('[role="dialog"]')).toBeNull();
+    });
+
+    it('hides a trial the balance cannot finish, and keeps one it can beside the part', async () => {
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 46, documents: 46, credits: 9.2, balance: 0.6 } });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 2 rows')!.click());
+        expect(container.querySelector('.bt-fill-callout')!.textContent).toContain('cover 3 of 46 items');
+        expect(buttonNamed('Try 5 first')).toBeUndefined();
+        expect(buttonNamed('Fill 3 of 46')).toBeDefined();
+        act(() => buttonNamed('Cancel')!.click());
+        fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 46, documents: 46, credits: 9.2, balance: 6 } });
+        await act(async () => buttonNamed('Fill 2 rows')!.click());
+        expect(buttonNamed('Fill 30 of 46')).toBeDefined();
+        expect(buttonNamed('Try 5 first')).toBeDefined();
+    });
+
+    it("offers the way to credits when the plan's rows reach no item it reads", async () => {
+        // The first item costs more than the balance, though a later one would not.
+        fills.affordablePart.mockReturnValueOnce({ rows: 0, items: 0, credits: 0 });
+        fills.plan.mockResolvedValueOnce({
+            ok: true,
+            plan: { ...plan, rows: 7, documents: 3, title_abstract: 4, credits: 0.8, balance: 0.1 },
+        });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 2 rows')!.click());
+        const callout = container.querySelector('.bt-fill-callout')!;
+        expect(callout.textContent).toContain("Your 0.1 credits don't cover the first item this fill reads.");
+        expect(callout.getAttribute('role')).toBe('alert');
+        expect(buttonNamed('Fill 7')).toBeUndefined();
+        expect(buttonNamed('Get credits') ?? buttonNamed('Add credits')).toBeDefined();
     });
 
     it('shows no balance when it covers the fill', async () => {
@@ -189,7 +236,7 @@ describe('TableFillButton', () => {
         await act(async () => buttonNamed('Fill 2 rows')!.click());
         const popover = container.querySelector('[role="dialog"]')!;
         expect(popover.textContent).not.toContain('640');
-        expect(popover.querySelector('.bt-fill-reach')).toBeNull();
+        expect(popover.querySelector('.bt-fill-callout')).toBeNull();
     });
 
     it('offers Get credits instead of Fill when the balance cannot pay for one item', async () => {
@@ -200,7 +247,8 @@ describe('TableFillButton', () => {
         expect(popover.querySelector('.bt-fill-cost')?.textContent).toBe('1.4 credits');
         expect(popover.textContent).toContain('Filling uses Beaver credits: 0.2 per item. You have 0 credits.');
         expect(popover.textContent).toContain('You can still add rows and edit cells by hand.');
-        expect(popover.textContent).not.toContain('cover about');
+        expect(popover.querySelectorAll('.bt-fill-callout')).toHaveLength(1);
+        expect(popover.querySelector('.bt-fill-callout')!.getAttribute('role')).toBe('alert');
         expect(buttonNamed('Fill 7')).toBeUndefined();
         expect(buttonNamed('Try 5 first')).toBeUndefined();
         act(() => buttonNamed('Get credits')!.click());
@@ -226,12 +274,12 @@ describe('TableFillButton', () => {
         window.dispatchEvent(new Event('focus'));
         expect(accountRefresh).toHaveBeenCalledTimes(1);
         expect(accountRefresh).toHaveBeenCalledWith(true);
-        // The live balance wins over the plan's (0.2, which would cover one item).
+        // The live balance wins over the plan's (10, which covers the fill).
         expect(buttonNamed('Get credits', '.bt-fill-popover')).toBeDefined();
         expect(buttonNamed('Fill 2')).toBeUndefined();
         setBalance(25);
         expect(buttonNamed('Get credits')).toBeUndefined();
-        expect(container.querySelector('.bt-fill-reach')).toBeNull();
+        expect(container.querySelector('.bt-fill-callout')).toBeNull();
         // With enough credits, focus no longer asks for the balance.
         accountRefresh.mockClear();
         window.dispatchEvent(new Event('focus'));
@@ -340,7 +388,7 @@ describe('the Fill menu and plans asked for elsewhere in the tab', () => {
 
 describe('the refill alert', () => {
     const rows = ['a', 'b', 'c', 'd', 'e', 'f', 'g'].map((id) => row(id, { method: answered }));
-    const alert = () => container.querySelector('.bt-fill-refill');
+    const alert = () => container.querySelector('.bt-fill-callout-info');
     const open = async (shown: Partial<TableFillPlanSummary>) => {
         fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, rows: 7, documents: 7, credits: 1.4, ...shown } });
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec(rows), job: null, improvableRows: new Set<string>() }));
