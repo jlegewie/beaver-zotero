@@ -81,7 +81,7 @@ describe('the column editor cost line', () => {
     it('prices a new column on a filled table as reading every item again', async () => {
         await open({ spec: spec([{ id: 'a', cells: { method: answered } }, { id: 'b', cells: { method: answered } }]) });
         expect(note()).toBe(
-            'Filling this column reads 2 items again: up to 0.7 credits. Add your other columns first; one fill answers them all.',
+            'Filling this column reads up to 2 items again, at most 0.7 credits. Add your other columns first; one fill answers them all.',
         );
     });
 
@@ -91,18 +91,18 @@ describe('the column editor cost line', () => {
         const column = table.columns[0];
         const draft = columnEditorDraft(column);
         await open({ spec: table, column, initial: { ...draft, column: { ...draft.column, description: 'Which design?' } } });
-        expect(note()).toContain('reads 2 items again');
+        expect(note()).toContain('reads up to 2 items again');
         // Only some papers read (a trial): no "again".
         await open({ spec: spec([{ id: 'a', cells: { method: answered } }, { id: 'b', cells: {} }]) });
-        expect(note()).toContain('Filling this column reads 2 items: up to');
+        expect(note()).toContain('Filling this column reads up to 2 items, at most');
         // An answer the user typed is no sign the paper was read.
         await open({ spec: spec([{ id: 'a', cells: { sample: byUser } }]) });
-        expect(note()).toContain('Filling this column reads 1 item: up to');
+        expect(note()).toContain('Filling this column reads up to 1 item, at most');
     });
 
     it('drops "again" on a table never filled, and says nothing without rows', async () => {
         await open({ spec: spec([{ id: 'a', cells: {} }]) });
-        expect(note()).toContain('Filling this column reads 1 item: up to 0.35 credits.');
+        expect(note()).toContain('Filling this column reads up to 1 item, at most 0.35 credits.');
         await open({ spec: spec([]) });
         expect(note()).toBeNull();
     });
@@ -117,7 +117,7 @@ describe('the column editor cost line', () => {
         const draft = columnEditorDraft(column);
         await open({ spec: table, column, initial: { ...draft, column: { ...draft.column, description: 'Which design?' } } });
         // Mark out of date is preselected: every row but the user's answer is read again.
-        expect(note()).toContain('Filling this column reads 2 items again');
+        expect(note()).toContain('Filling this column reads up to 2 items again');
         await act(async () => container.querySelector<HTMLInputElement>('input[type="radio"]')!.click());
         expect(note()).toBeNull();
         // Only the header: nothing to fill.

@@ -186,13 +186,13 @@ describe("table fill copy", () => {
         const fill = { rows: 46, documents: 46, title_abstract: 0, credits: 9.2 };
         const prices = { document: 0.2, title_abstract: 0.05 };
         expect(balanceShortfall(fill, prices, 6, { partial: true })).toEqual({
-            text: "Your 6 credits cover 30 of 46 items. The rest can be filled once you add credits.",
+            text: "Your 6 credits cover the first 30 of 46 items. The rest can be filled once you add credits.",
             blocked: false,
             affordable: 30,
             part: { rows: 30, items: 30, of: 46, credits: 6 },
         });
         expect(balanceShortfall(fill, prices, 1, { partial: true })!.text).toBe(
-            "Your 1 credit covers 5 of 46 items. The rest can be filled once you add credits.",
+            "Your 1 credit covers the first 5 of 46 items. The rest can be filled once you add credits.",
         );
         // A surface that can only fill everything: the fill stops partway.
         expect(balanceShortfall(fill, prices, 6)).toEqual({
@@ -203,21 +203,37 @@ describe("table fill copy", () => {
         });
         expect(balanceShortfall(fill, prices, 9.2)).toBeNull();
         expect(balanceShortfall(fill, prices, null)).toBeNull();
-        // Items the fill reads: an unreadable row is not one of them.
+        // Without the plan, the first rows the limit sends, unreadable items included.
         expect(balanceShortfall({ ...fill, rows: 47 }, prices, 6, { partial: true })!.part).toEqual({
             rows: 30,
             items: 30,
-            of: 46,
+            of: 47,
             credits: 6,
+        });
+        // However many items cannot be read, the part the balance pays for is offered.
+        expect(balanceShortfall({ rows: 3, documents: 2, title_abstract: 0, credits: 0.4 }, prices, 0.2, { partial: true })!.part).toEqual({
+            rows: 1,
+            items: 1,
+            of: 3,
+            credits: 0.2,
         });
         // A plan's exact part wins over the bound, asked for only once the balance falls short.
         const exactPart = vi.fn(() => ({ rows: 32, items: 31, credits: 5.95 }));
-        expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart })!.part).toEqual({
-            rows: 32,
-            items: 31,
-            of: 46,
-            credits: 5.95,
+        expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart })).toEqual({
+            text: "Your 6 credits cover 31 of 46 items. The rest can be filled once you add credits.",
+            blocked: false,
+            affordable: 32,
+            part: { rows: 32, items: 31, of: 46, credits: 5.95 },
         });
+        // The plan's rows reach no item it reads (its first item is dearer, or
+        // only unreadable rows): nothing would be answered, so it is blocked.
+        for (const reach of [{ rows: 0, items: 0, credits: 0 }, { rows: 2, items: 0, credits: 0 }])
+            expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart: () => reach })).toEqual({
+                text: "Your 6 credits don't cover the first item this fill reads.",
+                blocked: true,
+                affordable: null,
+                part: null,
+            });
         balanceShortfall(fill, prices, 10, { exactPart: () => { throw new Error("not asked"); } });
         expect(balanceShortfall(fill, prices, 6, { partial: true, exactPart: () => null })!.part!.rows).toBe(30);
         // Not one item: blocked, with the no-credits text.
@@ -246,7 +262,7 @@ describe("table fill copy", () => {
                 partial: true,
             })!.text,
         ).toBe(
-            "Fills already running may use up to 4.7 of your 5 credits; the rest covers 1 of 3 items. The rest can be filled once you add credits.",
+            "Fills already running may use up to 4.7 of your 5 credits. What's left covers the first 1 of 3 items. Wait for them to finish or add credits.",
         );
         expect(fillPartLabel({ rows: 1300, items: 1234, of: 2000, credits: 1 })).toBe("Fill 1,234 of 2,000");
     });
@@ -273,10 +289,10 @@ describe("table fill copy", () => {
     it("prices a column the editor adds or asks anew at most at the document price", () => {
         const prices = { document: 0.35, title_abstract: 0.1 };
         expect(columnFillCostText(200, prices, true)).toBe(
-            "Filling this column reads 200 items again: up to 70 credits. Add your other columns first; one fill answers them all.",
+            "Filling this column reads up to 200 items again, at most 70 credits. Add your other columns first; one fill answers them all.",
         );
         expect(columnFillCostText(1, prices, false)).toBe(
-            "Filling this column reads 1 item: up to 0.35 credits. Add your other columns first; one fill answers them all.",
+            "Filling this column reads up to 1 item, at most 0.35 credits. Add your other columns first; one fill answers them all.",
         );
         expect(columnFillCostText(0, prices, true)).toBeNull();
         expect(columnFillCostText(10, null, true)).toBeNull();

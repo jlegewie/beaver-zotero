@@ -1163,7 +1163,8 @@ describe('TableCard', () => {
         it('warns when the balance does not reach, with a way to add credits', async () => {
             render({ ...costedFixture('create-items'), cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
             await click('Next');
-            const warning = container.querySelector('.table-card-footer-band-error[role="alert"]');
+            // A short balance is a status; only one that cannot fill anything is an alert.
+            const warning = container.querySelector('.table-card-footer-band-error[role="status"]');
             // This backend takes no limit: the fill can only stop partway.
             expect(warning?.textContent).toContain('This fill needs 9.2 credits and you have 6. It stops when your credits run out.');
             expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the table now');
@@ -1179,7 +1180,7 @@ describe('TableCard', () => {
             render({ ...request, cost: { rows: 46, documents: 46, title_abstract: 0, no_input: 0, credits: 9.2 } });
             await click('Next');
             // One band, red, with the way to credits; no fill action in it.
-            expect(bands()).toEqual(['Your 6 credits cover 30 of 46 items. The rest can be filled once you add credits.Add credits']);
+            expect(bands()).toEqual(['Your 6 credits cover the first 30 of 46 items. The rest can be filled once you add credits.Add credits']);
             expect(container.querySelector('.table-card-run-option')?.textContent).toBe('Fill the first 30 items now');
             expect(receipt()).toBe('30 of 46 items · up to 6 credits');
             // Thirty rows: the five-row trial still fits.
@@ -1323,6 +1324,34 @@ describe('TableCard', () => {
                 expect(button('Create table')!.disabled).toBe(false);
             } finally {
                 vi.useRealTimers();
+            }
+        });
+
+        it('after a source edit, offers the trial only when the balance can finish it', async () => {
+            mocks.resolveLibraryScope.mockResolvedValue({
+                resolved: { count: 40, total: 40, truncated: false, without_pdf: 4, sample: [] },
+                rows: Array.from({ length: 40 }, (_, i) => ({ item_id: `u-COLL${String(i).padStart(4, '0')}`, display_name: `C${i}` })),
+                name: 'Cash transfers',
+            });
+            render(costedFixture('create-trial'));
+            await act(async () => {
+                mocks.target.pickCollection(41);
+            });
+            await click('Next');
+            expect(receipt()).toMatch(/^Up to /);
+            expect(controls()).toEqual(['Cancel', 'Back', 'Try 5 first', 'Create table']);
+            act(() => root?.unmount());
+            mocks.balance = 0.4;
+            try {
+                render(costedFixture('create-trial'));
+                await act(async () => {
+                    mocks.target.pickCollection(41);
+                });
+                await click('Next');
+                // The estimate warns of nothing yet, but a trial of 5 would run out.
+                expect(controls()).toEqual(['Cancel', 'Back', 'Create table']);
+            } finally {
+                mocks.balance = 6;
             }
         });
 
@@ -1559,7 +1588,7 @@ describe('TableCard', () => {
                 renderFill(request);
                 const band = container.querySelector('.table-card-footer-band-error')!;
                 // Every row priced as a document (6.1 / 30 at most), the balance surely pays for 7 rows.
-                expect(band.textContent).toContain('Your 1.45 credits cover 7 of 32 items. The rest can be filled once you add credits.');
+                expect(band.textContent).toContain('Your 1.45 credits cover the first 7 of 32 items. The rest can be filled once you add credits.');
                 expect(container.querySelector('.table-card-receipt')?.textContent).toBe('7 of 32 items · up to 1.42 credits');
                 expect(controls()).toEqual(['Cancel', 'Try 5 first', 'Fill 7 of 32']);
                 await click('Fill 7 of 32');
@@ -1590,9 +1619,9 @@ describe('TableCard', () => {
                 (globalThis as any).Zotero.Beaver = { tableFills: { pricing: async () => ({ document: 0.2, title_abstract: 0.05 }) } };
                 act(() => root?.unmount());
                 await act(async () => renderFill(request));
-                expect(container.querySelector('.table-card-footer-band-error')?.textContent).toBe(
-                    'Filling uses Beaver credits: 0.2 per item. You have 0.01 credits.',
-                );
+                const band = container.querySelector('.table-card-footer-band-error');
+                expect(band?.textContent).toBe('Filling uses Beaver credits: 0.2 per item. You have 0.01 credits.');
+                expect(band?.getAttribute('role')).toBe('alert');
                 expect(controls()).toEqual(['Cancel', 'Add credits']);
                 await click('Add credits');
                 expect(mocks.openPreferencesWindow).toHaveBeenCalledWith('billing');

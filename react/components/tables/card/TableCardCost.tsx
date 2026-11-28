@@ -171,7 +171,8 @@ export const TableCardFillWarnings: React.FC<TableCardFillWarningsProps> = ({
     let band: React.ReactNode;
     if (shortfall) {
         band = (
-            <div className="table-card-footer-band table-card-footer-band-error" role="alert">
+            // Only a balance that cannot fill anything interrupts; a short one is a status.
+            <div className="table-card-footer-band table-card-footer-band-error" role={shortfall.blocked ? 'alert' : 'status'}>
                 <Icon icon={SecurityWarningIcon} className="table-card-warning-icon" />
                 <span className="table-card-notice-text">{shortfall.text}</span>
                 {creditsAction && (

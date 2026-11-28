@@ -433,21 +433,19 @@ function FillPopover({
                         {sources ? <div className="bt-fill-note">{sources}</div> : null}
                     </div>
                 ) : null}
-                {noCredits ? (
-                    <div className="bt-fill-callout bt-fill-callout-error" role="status">
+                {shortfall ? (
+                    // Only a balance that cannot fill anything interrupts; a short one is a status.
+                    <div className="bt-fill-callout bt-fill-callout-error" role={shortfall.blocked ? 'alert' : 'status'}>
                         <Icon icon={SecurityWarningIcon} className="bt-fill-callout-icon" />
                         <span>
-                            {noCredits} {FILL_BY_HAND_NOTE}
-                        </span>
-                    </div>
-                ) : reach ? (
-                    <div className="bt-fill-callout bt-fill-callout-error" role="alert">
-                        <Icon icon={SecurityWarningIcon} className="bt-fill-callout-icon" />
-                        <span>
-                            {reach.text}{' '}
-                            <button type="button" className="text-link bt-fill-reach-link" onClick={openBilling}>
-                                {creditsLabel}
-                            </button>
+                            {shortfall.text}{' '}
+                            {shortfall.blocked ? (
+                                FILL_BY_HAND_NOTE
+                            ) : (
+                                <button type="button" className="text-link bt-fill-callout-link" onClick={openBilling}>
+                                    {creditsLabel}
+                                </button>
+                            )}
                         </span>
                     </div>
                 ) : refill ? (

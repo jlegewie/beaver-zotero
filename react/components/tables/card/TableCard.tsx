@@ -62,7 +62,7 @@ import {
     type TableCardStep,
 } from '@beaver/agent-core/run-state/tableCardDraft';
 import { MAX_MODEL_COLUMNS } from '@beaver/agent-core/layouts/table';
-import { trialWithinBalance } from '@beaver/agent-core/run-state/tableFillCopy';
+import { balanceShortfall, trialWithinBalance } from '@beaver/agent-core/run-state/tableFillCopy';
 import { useAddSourcesMenu, type AddSourcesMenuHandle } from '@beaver/agent-ui/composer/useAddSourcesMenu';
 import { ArrowLeftIcon } from '@beaver/agent-ui/icons';
 import Button from '@beaver/agent-ui/primitives/Button';
@@ -87,7 +87,14 @@ import {
     TableIcon,
 } from '../../icons/icons';
 import AddSourcesMenu, { type AddSourcesTarget } from '../../ui/menus/AddSourcesMenu';
-import { TableCardFillWarnings, TableCardReceipt, useCardBalanceShortfall, useFillPricing, useShortWindow } from './TableCardCost';
+import {
+    TableCardFillWarnings,
+    TableCardReceipt,
+    useCardBalanceShortfall,
+    useCreditBalance,
+    useFillPricing,
+    useShortWindow,
+} from './TableCardCost';
 import { describeItems, resolveItems, resolveLibraryScope } from './liveSources';
 import { previewFacts } from '@beaver/agent-core/layouts/tableEdit';
 import type { SourceEntry } from '@beaver/agent-core/layouts/table';
@@ -566,8 +573,11 @@ export const TableCard: React.FC<TableCardProps> = ({ request, onSubmit, disable
     const runOption = part
         ? `Fill the first ${part.items.toLocaleString('en-US')} items now`
         : createRunOption(draft, request);
-    // The trial, for a large fill the balance can finish it for.
-    const trialRows = fillNow ? trialWithinBalance(createCardTrialRows(request, cost), shortfall) : null;
+    // The trial, for a large fill the balance can finish it for: judged on
+    // the estimate too, which warns of nothing until its exact cost arrives.
+    const balance = useCreditBalance();
+    const trialShortfall = upperBound && cost ? balanceShortfall(cost, prices, balance) : shortfall;
+    const trialRows = fillNow ? trialWithinBalance(createCardTrialRows(request, cost), trialShortfall) : null;
     // An edit the card cannot price yet (prices still loading, or unavailable)
     // holds back the run; unticking the checkbox still creates the table.
     const runUnpriced = !!request.cost && draft.columns.length > 0 && !cost;

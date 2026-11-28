@@ -330,7 +330,9 @@ export interface ShortfallOptions {
 /**
  * The warning when the balance does not cover a fill. Where the surface can
  * fill only the part the balance pays for (`partial`): "Your 1.6 credits
- * cover 8 of 23 items. The rest can be filled once you add credits."
+ * cover 10 of 22 items. The rest can be filled once you add credits." (A
+ * card without the plan names the first rows the balance surely pays for:
+ * "cover the first 8 of 23 items".)
  * Otherwise: "This fill needs 3.5 credits and you have 1.6. It stops when
  * your credits run out." With running fills holding part of the account's
  * balance, it says so. A balance short of one item is `blocked`, with
@@ -352,31 +354,43 @@ export function balanceShortfall(
             : null;
     if (noCredits) return { text: noCredits, blocked: true, affordable: null, part: null };
     const exact = exactPart?.();
+    // The plan's own rows: when the balance reaches none of the items it
+    // reads (its first item is dearer than the balance, or the rows it
+    // reaches are only ones that cannot be read), the fill would stop before
+    // answering anything.
+    if (exact && exact.rows < fill.rows && exact.items === 0) {
+        const text = `Your ${creditsText(balance)} ${creditsText(balance).endsWith("credit") ? "doesn't" : "don't"} cover the first item this fill reads.`;
+        const running = runningFillsText(balance, accountBalance);
+        return {
+            text: running ? `${text} ${running}. Wait for them to finish or add credits.` : text,
+            blocked: true,
+            affordable: null,
+            part: null,
+        };
+    }
     let part: AffordablePart | null = null;
     let affordable: number | null;
-    // Shown in the items the fill reads, as its receipt counts them.
-    const read = fill.documents + fill.title_abstract || fill.rows;
     if (exact && exact.rows < fill.rows) {
+        // A kept plan's own rows: shown in the items it reads, as its
+        // heading counts them.
         affordable = exact.rows;
-        if (exact.rows > 0) part = { ...exact, of: read };
+        part = { ...exact, of: fill.documents + fill.title_abstract || fill.rows };
     } else {
+        // Without the plan, the first rows the balance surely pays for, shown
+        // as exactly what a limit fills: the first N of the fill's items,
+        // those that cannot be read included.
         affordable = affordableRowsBound(fill, prices, balance);
         const dearest = Math.max(fill.documents ? pricing.document : 0, fill.title_abstract ? pricing.title_abstract : 0);
-        // The bound's rows may include an item that is not read, so the items
-        // it names are at most what the part reads.
         if (affordable)
-            part = {
-                rows: affordable,
-                items: Math.min(affordable, read),
-                of: read,
-                credits: Math.min(balance, affordable * dearest),
-            };
+            part = { rows: affordable, items: affordable, of: fill.rows, credits: Math.min(balance, affordable * dearest) };
     }
     const running = runningFillsText(balance, accountBalance);
     if (partial && part) {
-        const covers = `${part.items.toLocaleString("en-US")} of ${count(part.of, "item")}`;
-        const head = running ? `${running}; the rest covers ${covers}.` : `Your ${creditsText(balance)} ${creditsText(balance).endsWith("credit") ? "covers" : "cover"} ${covers}.`;
-        return { text: `${head} The rest can be filled once you add credits.`, blocked: false, affordable, part };
+        const covers = `${exact ? "" : "the first "}${part.items.toLocaleString("en-US")} of ${count(part.of, "item")}`;
+        const text = running
+            ? `${running}. What's left covers ${covers}. Wait for them to finish or add credits.`
+            : `Your ${creditsText(balance)} ${creditsText(balance).endsWith("credit") ? "covers" : "cover"} ${covers}. The rest can be filled once you add credits.`;
+        return { text, blocked: false, affordable, part };
     }
     const needs = `This fill needs ${creditsText(fill.credits)}`;
     const head = running ? `${needs}. ${running}.` : `${needs} and you have ${formatCredits(balance)}.`;
@@ -402,14 +416,14 @@ export function fillPartLabel(part: AffordablePart): string {
 
 /**
  * What filling a column added or asked anew would cost, in the column
- * editor: "Filling this column reads 200 items again: up to 70 credits. Add
- * your other columns first; one fill answers them all." Every row is counted
- * at the document price, so it is an upper bound. Null without rows or prices.
+ * editor: "Filling this column reads up to 200 items again, at most 70
+ * credits. Add your other columns first; one fill answers them all." Every
+ * row is counted, at the document price: both are upper bounds. Null without rows or prices.
  */
 export function columnFillCostText(rows: number, prices: TableFillPricing | null, again: boolean): string | null {
     if (rows <= 0 || !prices) return null;
     const credits = rows * Math.max(prices.document, prices.title_abstract);
-    return `Filling this column reads ${count(rows, "item")}${again ? " again" : ""}: up to ${creditsText(credits)}. Add your other columns first; one fill answers them all.`;
+    return `Filling this column reads up to ${count(rows, "item")}${again ? " again" : ""}, at most ${creditsText(credits)}. Add your other columns first; one fill answers them all.`;
 }
 
 /** The price of the cheapest item a plan pays for; null when it pays for none. */

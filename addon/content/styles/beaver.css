@@ -5109,16 +5109,16 @@
     color: var(--tag-red-primary);
 }
 
+/* Its way to credits reads as a link, as in the table tab's callout. */
+[id^="beaver-pane-"] .table-card-footer-band-error .table-card-warning-action {
+    text-decoration: underline;
+}
+
 /* Grey: worth knowing before the fill, no action needed. */
 [id^="beaver-pane-"] .table-card-footer-band-info {
     color: var(--fill-secondary);
 }
 
-[id^="beaver-pane-"] .table-card-footer-band-error .table-card-warning-action:disabled {
-    opacity: 0.5;
-    cursor: default;
-    text-decoration: none;
-}
 
 /* In a short window the fill warnings close the scrolling content instead,
  * flush with the card's edges and the footer below them. */

@@ -406,7 +406,7 @@
     color: var(--fill-secondary);
 }
 
-.beaver-root .bt-fill-reach-link {
+.beaver-root .bt-fill-callout-link {
     flex: 0 0 auto;
     padding: 0;
     font: inherit;
@@ -415,15 +415,10 @@
 }
 
 /* In the red line, the links take its color rather than the link color. */
-.beaver-root .bt-fill-callout .bt-fill-reach-link {
+.beaver-root .bt-fill-callout .bt-fill-callout-link {
     color: inherit;
     text-decoration: underline;
     text-underline-offset: 2px;
-}
-
-.beaver-root .bt-fill-reach-link:disabled {
-    opacity: 0.5;
-    cursor: default;
 }
 
 .beaver-root .bt-fill-status {

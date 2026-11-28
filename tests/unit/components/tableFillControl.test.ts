@@ -187,6 +187,8 @@ describe('TableFillButton', () => {
         expect(callouts).toHaveLength(1);
         expect(callouts[0].className).toContain('bt-fill-callout-error');
         expect(callouts[0].textContent).toContain('Your 0.2 credits cover 1 of 2 items. The rest can be filled once you add credits.');
+        // A short balance is a status; one that cannot fill anything is an alert.
+        expect(callouts[0].getAttribute('role')).toBe('status');
         expect(fills.affordablePart).toHaveBeenCalledWith('plan-1', 0.2);
         expect(buttonNamed('Try 5 first')).toBeUndefined();
         expect(buttonNamed('Fill 2')).toBeUndefined();
@@ -212,6 +214,22 @@ describe('TableFillButton', () => {
         expect(buttonNamed('Try 5 first')).toBeDefined();
     });
 
+    it("offers the way to credits when the plan's rows reach no item it reads", async () => {
+        // The first item costs more than the balance, though a later one would not.
+        fills.affordablePart.mockReturnValueOnce({ rows: 0, items: 0, credits: 0 });
+        fills.plan.mockResolvedValueOnce({
+            ok: true,
+            plan: { ...plan, rows: 7, documents: 3, title_abstract: 4, credits: 0.8, balance: 0.1 },
+        });
+        render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
+        await act(async () => buttonNamed('Fill 2 rows')!.click());
+        const callout = container.querySelector('.bt-fill-callout')!;
+        expect(callout.textContent).toContain("Your 0.1 credits don't cover the first item this fill reads.");
+        expect(callout.getAttribute('role')).toBe('alert');
+        expect(buttonNamed('Fill 7')).toBeUndefined();
+        expect(buttonNamed('Get credits') ?? buttonNamed('Add credits')).toBeDefined();
+    });
+
     it('shows no balance when it covers the fill', async () => {
         fills.plan.mockResolvedValueOnce({ ok: true, plan: { ...plan, balance: 640 } });
         render(React.createElement(TableFillButton, { tableRef: ref, table: spec([row('a'), row('b')]), job: null, improvableRows: new Set<string>() }));
@@ -230,6 +248,7 @@ describe('TableFillButton', () => {
         expect(popover.textContent).toContain('Filling uses Beaver credits: 0.2 per item. You have 0 credits.');
         expect(popover.textContent).toContain('You can still add rows and edit cells by hand.');
         expect(popover.querySelectorAll('.bt-fill-callout')).toHaveLength(1);
+        expect(popover.querySelector('.bt-fill-callout')!.getAttribute('role')).toBe('alert');
         expect(buttonNamed('Fill 7')).toBeUndefined();
         expect(buttonNamed('Try 5 first')).toBeUndefined();
         act(() => buttonNamed('Get credits')!.click());
