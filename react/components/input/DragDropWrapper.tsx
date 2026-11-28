@@ -26,13 +26,15 @@ interface DragDropWrapperProps {
 const isViewDrag = (dataTransfer: DataTransfer): boolean =>
     dataTransfer.types.includes('zotero/search') || dataTransfer.types.includes(VIEW_ROW_DRAG_TYPE);
 
-/** True when the drag carries OS files (not Zotero objects). */
+/** True when the drag carries OS files (not Zotero objects). Firefox 153 lists them as `Files` only. */
 const isFileDrag = (dataTransfer: DataTransfer): boolean =>
     !dataTransfer.types.includes('zotero/item')
     && !dataTransfer.types.includes('zotero/annotation')
     && !dataTransfer.types.includes('zotero/collection')
     && !isViewDrag(dataTransfer)
-    && (dataTransfer.types.includes('application/x-moz-file') || dataTransfer.types.includes('text/x-moz-url'));
+    && (dataTransfer.types.includes('Files')
+        || dataTransfer.types.includes('application/x-moz-file')
+        || dataTransfer.types.includes('text/x-moz-url'));
 
 /** The saved searches or built-in views a drag carries, as the rows they came from. */
 const getDraggedViews = (dataTransfer: DataTransfer): ViewSelection[] => {

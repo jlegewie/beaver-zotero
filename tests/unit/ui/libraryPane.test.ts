@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
-import { describe, expect, it } from 'vitest';
-import { activeItemPane, isLibraryTabSelected, isLibraryTabType } from '../../../src/ui/libraryPane';
+import { describe, expect, it, vi } from 'vitest';
+import { activeItemPane, isLibraryTabSelected, isLibraryTabType, selectLibraryTab } from '../../../src/ui/libraryPane';
 
 function windowWith(itemPane: HTMLElement | null, tabs: any = {}) {
     return { closed: false, document, ZoteroPane: { itemPane }, Zotero_Tabs: tabs } as unknown as Window;
@@ -45,5 +45,20 @@ describe('activeItemPane', () => {
         pane('zotero-item-pane');
         const second = pane('zotero-item-pane-tab-b');
         expect(activeItemPane(windowWith(second))).toBe(second);
+    });
+});
+
+describe('selectLibraryTab', () => {
+    it("uses Zotero 11's selectLibraryTab when present", () => {
+        const tabs = { select: vi.fn(), selectLibraryTab: vi.fn() };
+        selectLibraryTab(windowWith(null, tabs));
+        expect(tabs.selectLibraryTab).toHaveBeenCalledTimes(1);
+        expect(tabs.select).not.toHaveBeenCalled();
+    });
+
+    it('selects the zotero-pane tab on Zotero 7–10', () => {
+        const tabs = { select: vi.fn() };
+        selectLibraryTab(windowWith(null, tabs));
+        expect(tabs.select).toHaveBeenCalledWith('zotero-pane');
     });
 });

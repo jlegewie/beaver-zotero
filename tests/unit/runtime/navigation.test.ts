@@ -19,6 +19,44 @@ beforeEach(() => {
     });
 });
 
+/** A Zotero 11 window with no library view, e.g. one opened from a reader tab. */
+function libraryLessWindow(id: string) {
+    const win = main(id);
+    const views = { itemsView: win.ZoteroPane.itemsView, collectionsView: win.ZoteroPane.collectionsView };
+    win.ZoteroPane = {
+        libraryViews: [], libraryView: null, itemsView: null, collectionsView: null,
+        loadedPromise: Promise.resolve(),
+        waitForLibraryView: vi.fn(async () => {
+            Object.assign(win.ZoteroPane, views, { libraryView: {} });
+            win.ZoteroPane.libraryViews.push(win.ZoteroPane.libraryView);
+            return win.ZoteroPane.libraryView;
+        }),
+    };
+    win.Zotero_Tabs.selectLibraryTab = vi.fn(() => { win.Zotero_Tabs.selectedID = 'tab-new'; });
+    return win;
+}
+
+describe('Zotero 11 windows without a library view', () => {
+    it('resolves a command that does not need the library without opening a library tab', async () => {
+        const win = libraryLessWindow('a');
+        expect(await resolveNavigationWindow(win)).toBe(win);
+        expect(win.Zotero_Tabs.selectLibraryTab).not.toHaveBeenCalled();
+    });
+    it('opens the library tab and waits for its view for a library command', async () => {
+        const win = libraryLessWindow('a');
+        expect(await resolveNavigationWindow(win, { libraryView: true })).toBe(win);
+        expect(win.Zotero_Tabs.selectLibraryTab).toHaveBeenCalledTimes(1);
+        expect(win.ZoteroPane.waitForLibraryView).toHaveBeenCalledWith('tab-new');
+        expect(win.ZoteroPane.itemsView.waitForLoad).toHaveBeenCalled();
+    });
+    it('gives up instead of opening another tab when the library tab closes while loading', async () => {
+        const win = libraryLessWindow('a');
+        win.ZoteroPane.waitForLibraryView = vi.fn(async () => null);
+        await expect(resolveNavigationWindow(win, { libraryView: true })).rejects.toMatchObject({ code: 'window_unavailable' });
+        expect(win.Zotero_Tabs.selectLibraryTab).toHaveBeenCalledTimes(1);
+    });
+});
+
 describe('navigation ownership', () => {
     it('keeps an originating main window while another window is focused', async () => {
         expect(await resolveNavigationWindow(a)).toBe(a);

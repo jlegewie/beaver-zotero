@@ -28,7 +28,7 @@
  */
 
 import { getContextWindow, getHostWindow } from '../../runtime/windowRuntime';
-import { SIDEBAR_MOUNT_ID } from '../../../src/ui/libraryPane';
+import { isLibraryTabType, selectLibraryTab, SIDEBAR_MOUNT_ID } from '../../../src/ui/libraryPane';
 import { isStackedLayout, widthAttribute } from '../../utils/zoteroLayout';
 
 import { BeaverUIFactory } from '../../../src/ui/ui';
@@ -263,7 +263,12 @@ export async function handleTestSelectTabHttpRequest(request: any): Promise<any>
     const timeoutMs = settleTimeout(request);
 
     if (close_tabs) {
-        tabs.closeAll();
+        // Close every tab except library tabs: Zotero 11's closeAll() closes
+        // library tabs too, and Zotero 7–10 keep only the first tab. Select
+        // (or open) a library tab first, so closing the rest never closes a
+        // window that has only reader or note tabs.
+        selectLibraryTab(mainWindow);
+        tabs.close(tabs._tabs.filter((t: any) => !isLibraryTabType(t.type)).map((t: any) => t.id));
         // Closing lands on the library tab; let tracking observe that before
         // the selection below, so the transition under test starts from a
         // known state rather than from a half-finished teardown.
@@ -272,7 +277,7 @@ export async function handleTestSelectTabHttpRequest(request: any): Promise<any>
     }
 
     if (tab === 'library') {
-        tabs.select('zotero-pane');
+        selectLibraryTab(mainWindow);
     } else if (library_id != null && zotero_key != null) {
         const item = await Zotero.Items.getByLibraryAndKeyAsync(library_id, zotero_key);
         if (!item) return { ok: false, error: 'not_found' };

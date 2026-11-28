@@ -42,6 +42,21 @@ export function isLibraryTabSelected(win: Window | null | undefined): boolean {
 }
 
 /**
+ * Select the window's active library tab, so a selection made through
+ * `ZoteroPane` is on screen. Zotero 11 assigns library tabs generated ids and a
+ * window need not have a `zotero-pane` tab, so selecting that id would throw;
+ * Zotero 7–10 have exactly one library tab, `zotero-pane`.
+ */
+export function selectLibraryTab(win: Window): void {
+    const tabs = (win as any).Zotero_Tabs;
+    if (typeof tabs?.selectLibraryTab === 'function') {
+        tabs.selectLibraryTab();
+    } else {
+        tabs?.select('zotero-pane');
+    }
+}
+
+/**
  * The item pane of the window's active library view, or null while the window
  * has none (Zotero 11 only). On Zotero 11 `ZoteroPane.itemPane` resolves to
  * the active view's pane; on earlier versions it is the window's only one.

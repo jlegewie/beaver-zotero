@@ -15,6 +15,7 @@
 import { openTable } from './openTable';
 import { listTableTabs, tableTabStats, TABLE_TAB_KIND, TABLE_TAB_TYPE } from './tableTab';
 import { beaverTabStartup } from './beaverTabs';
+import { selectLibraryTab } from './libraryPane';
 import {
     findTableWindow,
     listTableWindows,
@@ -325,9 +326,9 @@ export async function handleTableTabProbe(request: ProbeRequest = {}): Promise<a
             return { ...sync, containerAfterTick: !!win.document.getElementById(id), stats: tableTabStats(), tabs: tabsSummary(win) };
         }
         case 'select': {
-            const id = request.target === 'library' ? 'zotero-pane' : request.target;
-            if (!id) return { error: 'target is required' };
-            tabs.select(id);
+            if (!request.target) return { error: 'target is required' };
+            if (request.target === 'library') selectLibraryTab(win);
+            else tabs.select(request.target);
             await sleep(300);
             return { tabs: tabsSummary(win) };
         }

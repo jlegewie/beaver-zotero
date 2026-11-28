@@ -76,8 +76,8 @@ package type checks, bundle boundary checks, ESLint, and `git diff --check` pass
   reservations, unseen successors, canceled undo, handshake capability checks,
   authoritative history metadata, and command routing.
 
-The manifest range remains **6.999–10.0.***. This validation does not establish
-compatibility with Zotero 11 or every release within that range. No version-number
+This validation predates Zotero 11 and does not establish compatibility with every
+release in the manifest range (now **6.999–11.0.***). No version-number
 branches were added; tagged and untagged tab-event behavior has unit coverage.
 
 ### Remaining manual coverage
