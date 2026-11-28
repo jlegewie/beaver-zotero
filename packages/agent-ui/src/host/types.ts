@@ -849,6 +849,12 @@ export interface DialogsHost {
      * the answer before mutating any state.
      */
     confirm(opts: { title: string; text: string; confirmLabel: string; window?: Window }): boolean;
+    /**
+     * Open the client's error report form with `text` filled in: a part of
+     * the UI that failed to render, the ids support needs, and the error.
+     * Optional — without it, the error notice offers only the support email.
+     */
+    reportRenderError?(text: string): void;
 }
 
 /**

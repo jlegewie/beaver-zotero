@@ -12,6 +12,7 @@ import { store } from "../../store";
 import { useAutoScroll } from "../../hooks/useAutoScroll";
 import { toolExpansionRevisionAtom, messageSourcesVisibilityAtom, annotationPanelStateAtom } from "../../atoms/messageUIState";
 import { logger } from "@beaver/agent-core/platform/logger";
+import RenderErrorBoundary from "@beaver/agent-ui/chat/RenderErrorBoundary";
 
 const RESTORE_THRESHOLD = 100; // pixels - threshold for restoring scroll position
 /**
@@ -665,13 +666,36 @@ export const ThreadView = forwardRef<HTMLDivElement, ThreadViewProps>(
                 ref={setScrollContainerRef}
             >
                 <div ref={contentRef} className="display-flex flex-col flex-shrink-0 min-w-0 gap-4 beaver-content-column">
+                    {/* Each message has its own boundary: one that fails to render
+                        shows a notice in its place, and the rest of the thread and
+                        the composer keep working. A failed message gets another try
+                        when its run changes status (a stream finishing), not on
+                        every streamed update: each retry that fails again would
+                        replace the notice, closing its Details. */}
                     {runs.map((run, index) => (
-                        <AgentRunView
+                        <RenderErrorBoundary
                             key={run.id}
-                            ref={run.id === pendingRunId ? setPendingRunRef : undefined}
-                            run={run}
-                            isLastRun={index === runs.length - 1}
-                        />
+                            scope="message"
+                            summary="This message couldn't be shown."
+                            detail="The rest of the chat still works."
+                            threadId={currentThreadId}
+                            runId={run.id}
+                            resetKey={run.status}
+                            className="px-4"
+                            // The run's anchor, so a link to this message still
+                            // lands on it and completes the pending jump.
+                            wrapFallback={(notice) => (
+                                <div id={`run-${run.id}`} ref={run.id === pendingRunId ? setPendingRunRef : undefined}>
+                                    {notice}
+                                </div>
+                            )}
+                        >
+                            <AgentRunView
+                                ref={run.id === pendingRunId ? setPendingRunRef : undefined}
+                                run={run}
+                                isLastRun={index === runs.length - 1}
+                            />
+                        </RenderErrorBoundary>
                     ))}
                 </div>
             </div>

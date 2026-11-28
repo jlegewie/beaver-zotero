@@ -1,6 +1,7 @@
 import React from 'react';
 import { useAtomValue } from 'jotai';
 import Sidebar from './Sidebar';
+import SidebarErrorBoundary from './SidebarErrorBoundary';
 import WindowNav from './window/WindowNav';
 import WindowHeader from './window/WindowHeader';
 import { useBeaverWindowContext } from '../hooks/useBeaverWindowContext';
@@ -53,11 +54,14 @@ const WindowSidebar = () => {
                     {hasHistory && <WindowNav collapsed={navCollapsed} />}
                 </aside>
                 <div className="beaver-window-main">
-                    <Sidebar
-                        location="library"
-                        isWindow={true}
-                        header={<WindowHeader showChat={hasHistory} />}
-                    />
+                    {/* Its own boundary, so the chat history beside it stays usable. */}
+                    <SidebarErrorBoundary>
+                        <Sidebar
+                            location="library"
+                            isWindow={true}
+                            header={<WindowHeader showChat={hasHistory} />}
+                        />
+                    </SidebarErrorBoundary>
                 </div>
             </div>
         </>
