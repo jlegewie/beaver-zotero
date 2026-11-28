@@ -3,6 +3,7 @@ import { isRenderableMessage } from '@beaver/agent-core/agents/messageVisibility
 import { getToolCallLabel, toolCallSearchText, type ToolCallLabelEnrich } from '@beaver/agent-core/run-state/toolLabels';
 import { parseArgs } from '@beaver/agent-core/run-state/toolCallRequest';
 import { isToolResultView } from '@beaver/agent-core/run-state/toolResultViews';
+import { stripCitationMarkerChars } from './citationPreprocessing';
 
 /**
  * The section headings of a chat saved as a note. They are interface text,
@@ -65,7 +66,7 @@ export function extractRunResponseContent(
         if (isRenderableMessage(message)) {
             const textContent = message.parts
                 .filter((part): part is TextPart => part.part_kind === 'text')
-                .map(part => part.content)
+                .map(part => stripCitationMarkerChars(part.content ?? ''))
                 .filter(Boolean)
                 .join('\n\n');
 

@@ -1,6 +1,7 @@
 import React from 'react';
 import { TextPart } from '@beaver/agent-core/agents/types';
 import MarkdownRenderer from '../messages/MarkdownRenderer';
+import { stripCitationMarkerChars } from '../../utils/citationPreprocessing';
 
 interface TextPartViewProps {
     part: TextPart;
@@ -12,14 +13,16 @@ interface TextPartViewProps {
  * we simply render the current content state.
  */
 export const TextPartView: React.FC<TextPartViewProps> = React.memo(function TextPartView({ part }) {
-    if (!part.content || part.content.trim() === '' || part.content == '_') {
+    const stripped = stripCitationMarkerChars(part.content ?? '');
+    const content = stripped.trim();
+    if (content === '' || stripped === '_') {
         return null;
     }
 
     return (
         <MarkdownRenderer
             className="markdown chat-prose"
-            content={part.content.trim()}
+            content={content}
         />
     );
 });
