@@ -232,7 +232,7 @@ export async function viewAttachment(
     itemID: number, origin?: Window, options: { forceAlternateWindowBehavior?: boolean } = {},
 ): Promise<void> {
     try {
-        const win = await resolveNavigationWindow(origin ?? getContextWindow());
+        const win = await resolveNavigationWindow(origin ?? getContextWindow(), { libraryView: true });
         if (typeof (win.Zotero_Tabs as any).isOwnTabEvent !== 'function') {
             await focusLegacyTarget(win);
             assertLegacyTarget(win);

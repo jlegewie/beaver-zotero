@@ -21,8 +21,18 @@ export function contextMainWindow(origin?: Window | null): MainWindow | null {
     return owner && owner !== origin ? contextMainWindow(owner) : null;
 }
 
-/** Originless user commands choose once; local commands never fall through to another chat. */
-export async function resolveNavigationWindow(origin?: Window | null): Promise<MainWindow> {
+/**
+ * Originless user commands choose once; local commands never fall through to another chat.
+ *
+ * A Zotero 11 window need not have a library view (one opened from a reader or
+ * note has none until a library tab is opened). Commands that act on the
+ * library (`libraryView: true`) select or open the window's library tab and
+ * wait for its view; others, such as opening a reader, do not need one.
+ */
+export async function resolveNavigationWindow(
+    origin?: Window | null,
+    options: { libraryView?: boolean } = {},
+): Promise<MainWindow> {
     let target: MainWindow | null;
     if (origin) {
         target = contextMainWindow(origin);
@@ -41,6 +51,21 @@ export async function resolveNavigationWindow(origin?: Window | null): Promise<M
         // Reacquire until a window appears, then retain that command's target.
         if (!target) target = Zotero.getMainWindow();
         if (target && (target.closed || target.__beaverRuntime?.status === 'closing')) throw new WindowUnavailableError();
+        const pane = isMainWindow(target) ? target.ZoteroPane as any : null;
+        if (pane && Array.isArray(pane.libraryViews) && !pane.libraryView) {
+            // Zotero 11: a library view may never appear on its own, so wait
+            // for the window to finish loading rather than for one.
+            await pane.loadedPromise;
+            if (contextMainWindow(target) !== target) throw new WindowUnavailableError();
+            if (!pane.libraryView) {
+                if (!options.libraryView) return target!;
+                const tabs = target!.Zotero_Tabs as any;
+                tabs.selectLibraryTab();
+                // Null when the tab closed before its view loaded.
+                const view = await pane.waitForLibraryView(tabs.selectedID);
+                if (!view || contextMainWindow(target) !== target) throw new WindowUnavailableError();
+            }
+        }
         if (isMainWindow(target) && target.ZoteroPane.itemsView && target.ZoteroPane.collectionsView) {
             // The items view exists before the collections tree restores its initial
             // selection. Wait for that restoration before navigating or scrolling.
